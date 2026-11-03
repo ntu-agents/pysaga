@@ -1,0 +1,48 @@
+# The RL package on three systems: each release's wheel is installed on Ubuntu, macOS
+# and Windows, the demo runs and its fixed episode must reach the state hash named in
+# PUBLISHED.txt -- the same simulation, to the bit, on every processor and Java -- and
+# the conformance checks pass. Written by the development repository's publish step.
+name: RL package
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Download the release's wheel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download ${{ github.event.release.tag_name }} --repo "${{ github.repository }}" --pattern "*.whl" --dir dist
+      - name: Install it
+        run: python -m pip install dist/*.whl
+      - name: Run the demo in an empty folder
+        run: |
+          mkdir -p "$RUNNER_TEMP/work" && cd "$RUNNER_TEMP/work"
+          python -m pysaga.demo | tee demo.out
+          got=$(sed -n 's/^ *state hash *\(-\{0,1\}[0-9]*\).*/\1/p' demo.out)
+          want=$(sed -n 's/^demo state hash: //p' "$GITHUB_WORKSPACE/PUBLISHED.txt")
+          echo "state hash: $got, PUBLISHED.txt: $want"
+          [ -n "$got" ] && [ "$got" = "$want" ]
+      - name: The conformance checks
+        run: |
+          cd "$RUNNER_TEMP/work"
+          python -m pysaga.conformance

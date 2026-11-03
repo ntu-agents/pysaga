@@ -1,0 +1,25 @@
+# The RL package: pysaga, with the simulation compiled (pysaga/_data/saga-sim.jar) and
+# the game's data (pysaga/_data/game). Built by the development repository's
+# ./run-local.sh wheel, which fills in the version and the data; built from this file
+# alone, the package lacks both. Install the wheel from a release instead.
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pysaga"
+version = "0.1.795"
+description = "Saga Online as a multi-agent reinforcement learning environment"
+requires-python = ">=3.9"
+# The Python code: Apache 2.0. The bundled simulation and data (pysaga/_data): LICENSE-SIMULATION.md
+license = "Apache-2.0 AND LicenseRef-Saga-Simulation"
+license-files = ["LICENSE", "NOTICE", "LICENSE-SIMULATION.md"]
+dependencies = ["jpype1>=1.5", "numpy"]
+
+[tool.setuptools]
+packages = ["pysaga", "pysaga.epymarl"]
+include-package-data = false
+
+[tool.setuptools.package-data]
+pysaga = ["replay_viewer.html", "_data/*", "_data/**/*"]
+"pysaga.epymarl" = ["saga.yaml"]

@@ -1,0 +1,106 @@
+env: "saga"
+
+env_args:
+  # The map: a map of the game ("Ravenford"), a map file ("/path/map.json"), or
+  # one the generator makes ("gen:forest:trees=120", "@seed" optional).
+  map_name: "Ravenford"
+  # How often the map changes: "fixed" (one map) or "episode" (a generated map for
+  # every episode, its seed drawn from the episode's).
+  map_seed: "fixed"
+  # A curriculum over maps, for the vec runner: "0:gen:arena|2000000:gen:forest"
+  # plays each source from that many environment steps on. Null: map_name throughout.
+  map_schedule: null
+  # Where the game's data is. Null, the usual: the installed package's own (in the
+  # development repository: SAGA_ROOT, or the repository itself).
+  root: null
+  seed: null
+  # The observation function, and nothing else -- T(s,a) is identical in every
+  # mode, so "full" makes this a stochastic game and anything else a POSG.
+  #
+  # By name:
+  #   full | los | sight:<px> | cone:<px>:<deg> | squad:<px>
+  #   hearing:<sightPx>:<hearPx> | radar:<px>
+  # or any name given to register_observability(). pysaga.observability_modes()
+  # prints the list, and an unknown name fails with it rather than falling back.
+  #
+  # Or written out here, which is the general form -- a list of channels, each a
+  # condition plus the feature groups it grants, unioned:
+  #
+  #   observability:
+  #     channels:
+  #       - {range: 300, line_of_sight: true, reveals: "all"}
+  #       - {range: 600, reveals: "existence|position"}
+  #
+  # Groups: existence | position | health | identity | status | all | none.
+  #
+  # Every mode also gives the agent the walk and sight flags of the blocks within 3 of
+  # its own -- 98 numbers at the end of the observation. "+terrain:<r>" after a mode
+  # ("los+terrain:5"), or terrain: <r> in the written-out form, changes the radius,
+  # and "+terrain:0" leaves the patch out. A policy binds only to the radius it was
+  # trained with.
+  # A withheld group is zeroed AND flagged unknown, so hidden health cannot be
+  # read as death. The observation is the same width in every mode.
+  observability: "full"
+  # True: the agent learns its own build from the 20-row tree and spends its own
+  # skill points. False: it is dealt a fixed hotbar. The action space is the same
+  # either way -- the progression indices are reserved and masked.
+  progression: False
+  # The kit dealt when progression is off: "dealt" (each type's fire kit) or
+  # "basic", the weapon strike alone -- what a character has in the real client,
+  # so a policy meant to play there (neural:<file>) is trained on it.
+  kit: "dealt"
+  # The game mode and, for the team modes, the players a side: duel (1v1 deathmatch),
+  # tdm or dom. Every option here must be present for sacred to accept an override
+  # of it on the command line ("with env_args.mode=tdm"): a key the yaml lacks is
+  # refused as "Added new config entry that is not used anywhere".
+  mode: "duel"
+  team_size: 2
+  # The reward, by name: dense (the default) | sparse | ladder | zero, or a dict of
+  # weights over kill, death, damage_dealt, damage_taken, time, win, score, ...
+  # ladder pays the win at the end of the episode and is meant for gamma=0.995.
+  reward: "dense"
+  # Bots in the slots it names, so a learner trains against a fixed reference:
+  # a name for every slot but the first ("kite"), a list for slots 1, 2, ...
+  # (["melee", "kite"]), or {slot: name}. On the command line a string --
+  # "0:melee", "0:melee,2:kite", "1:melee|kite" (spread over the worlds) --
+  # since sacred turns a dict there into nested keys and refuses them. Bots:
+  # melee | hold | chase | flee | kite | kite:MIN:MAX | capture | defend.
+  # n_agents is then the learners alone.
+  scripted: null
+  # How many of the map's monster homes are filled: characters the world drives,
+  # hostile to every agent, each another block of the observation and another
+  # action target. A kill of one is weighed by the npc_kill reward term (ladder:
+  # a quarter of a player's kill), never by kill. 0 is a world without them; a map
+  # with fewer homes than asked is refused.
+  monsters: 0
+  # The decision rate: ticks of 50 ms a decision, 4 by default. An episode is as long in
+  # game time at any rate (6000 ticks: 1500 decisions at 4, 3000 at 2, so the batch's rows
+  # grow with it), and the reward's time term is priced per tick. The scripted bots and
+  # the balance tables are fitted to 4; a trained policy in a scripted slot decides at its
+  # own rate, and a run whose rates differ says so once. A discount (gamma) is the learner's: at 2, 0.995 looks half as far in time.
+  frame_skip: 4
+  # The inputs standardised for learning (pysaga.normalise): a file of fixed statistics,
+  # fitted once from data, which the environment applies to the observations and the
+  # state it returns -- actor and critic alike. null is the raw observation. pysaga.export
+  # writes it into the policy file, which NeuralPolicy applies, so an export plays as the
+  # run trained.
+  normalise: null
+
+# The saga PPO learner's own (learner=saga_ppo_learner, pysaga.epymarl.saga_learner): the
+# actor's and the critic's learning rates (null: EPyMARL's lr), and the environment steps
+# the actor is held still for while the critic learns (an actor initialised from a clone).
+# With these defaults it is the stock PPO learner.
+actor_lr: null
+critic_lr: null
+actor_hold_steps: 0
+
+# Read by EPyMARL's epsilon-greedy selectors only: its soft-policy selector (IPPO, MAPPO)
+# always samples, so their test curves are sampled play whatever this says. Measure a policy
+# greedy with pysaga.imitate's harness, or pysaga.offline.evaluate.
+test_greedy: True
+test_nepisode: 32
+test_interval: 50000
+log_interval: 50000
+runner_log_interval: 10000
+learner_log_interval: 10000
+t_max: 2050000

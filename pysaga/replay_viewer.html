@@ -1,0 +1,306 @@
+<title>/*__TITLE__*/</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a replay player -- the map canvas on the left, the readout and episode list on the right, stacking to one column on a phone. */
+  :root {
+    --bg: #f2f1ea; --fg: #1d1e19; --muted: #676a5e; --panel: #ffffff; --line: #d7d6cc; --soft: #e9e8df;
+    --t1: #c4452c; --t2: #2b64c9; --t3: #357f46; --t4: #b8731a; --good: #357f46; --warn: #b8731a; --bad: #c4452c;
+    --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg: #141619; --fg: #e6e4dc; --muted: #9a9c91; --panel: #1d2025; --line: #30343b; --soft: #262a30;
+    --t1: #ff7c5f; --t2: #6fa0ff; --t3: #5fb86f; --t4: #e0a24a; --good: #5fb86f; --warn: #e0a24a; --bad: #ff7c5f; color-scheme: dark; } }
+  :root[data-theme="dark"] {
+    --bg: #141619; --fg: #e6e4dc; --muted: #9a9c91; --panel: #1d2025; --line: #30343b; --soft: #262a30;
+    --t1: #ff7c5f; --t2: #6fa0ff; --t3: #5fb86f; --t4: #e0a24a; --good: #5fb86f; --warn: #e0a24a; --bad: #ff7c5f; color-scheme: dark; }
+
+  body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.45; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-block: 22px 40px; padding-inline: 16px; }
+  header { display: grid; gap: 6px; margin-bottom: 14px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  header p { margin: 0; color: var(--muted); max-width: 72ch; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; color: var(--muted); font-size: 13px; }
+  .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: -1px; margin-right: 5px; border: 1px solid rgba(0,0,0,0.4); }
+  .legend i.learner { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px currentColor; }
+
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; align-items: start; }
+  @media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+  .stage { min-width: 0; }
+  canvas { display: block; width: 100%; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; background: #000; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 10px; }
+  button, select { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px 11px; cursor: pointer; }
+  button:hover, select:hover { border-color: var(--muted); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--t2); outline-offset: 2px; }
+  button.primary { background: var(--t2); color: #fff; border-color: var(--t2); min-width: 86px; }
+  .scrub { flex: 1 1 220px; display: flex; align-items: center; gap: 10px; min-width: 0; }
+  input[type=range] { flex: 1; min-width: 0; accent-color: var(--t2); }
+  .time { font-family: var(--mono); font-size: 13px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .panel { min-width: 0; display: grid; gap: 14px; }
+  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; }
+  .box h2 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+  .now { font-family: var(--mono); font-size: 14px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-variant-numeric: tabular-nums; }
+  .now span:nth-child(odd) { color: var(--muted); }
+  .hp { display: grid; gap: 6px; margin-top: 10px; }
+  .hp .bar { height: 8px; background: var(--soft); border-radius: 2px; overflow: hidden; }
+  .hp .bar i { display: block; height: 100%; }
+  .hp .lbl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+  .eps { display: grid; gap: 6px; }
+  .ep { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; text-align: left; padding: 8px 10px; }
+  .ep[aria-pressed="true"] { border-color: var(--t2); box-shadow: inset 0 0 0 1px var(--t2); }
+  .ep .name { font-weight: 500; }
+  .ep .sub { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; font-family: var(--mono); }
+  .chip { font-size: 11.5px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); align-self: start; white-space: nowrap; }
+  .chip.good { color: var(--good); border-color: var(--good); } .chip.bad { color: var(--bad); border-color: var(--bad); }
+  .chip.warn { color: var(--warn); border-color: var(--warn); }
+
+  .mix { display: grid; gap: 5px; font-size: 13px; }
+  .mix h3 { font-size: 13px; font-weight: 500; margin: 6px 0 2px; }
+  .mix .row { display: grid; grid-template-columns: 92px 1fr 44px; align-items: center; gap: 8px; }
+  .mix .row .bar { height: 7px; background: var(--soft); border-radius: 2px; overflow: hidden; }
+  .mix .row .bar i { display: block; height: 100%; }
+  .mix .row .n { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  .mapkey { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .mapkey i { display: inline-block; width: 11px; height: 11px; vertical-align: -1px; margin-right: 5px; border: 1px solid rgba(0,0,0,0.45); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>/*__TITLE__*/</h1>
+    <p id="intro"></p>
+    <div class="legend" id="legend"></div>
+  </header>
+
+  <div class="app">
+    <div class="stage">
+      <canvas id="map" width="960" height="800" aria-label="Replay of the round on the map"></canvas>
+      <div class="controls">
+        <button id="play" class="primary" type="button">Play</button>
+        <button id="back" type="button" title="One decision back">&#9664;</button>
+        <button id="fwd" type="button" title="One decision forward">&#9654;</button>
+        <label class="time" for="speed">speed</label>
+        <select id="speed"><option value="1">1x</option><option value="2">2x</option><option value="4" selected>4x</option><option value="8">8x</option><option value="16">16x</option></select>
+        <div class="scrub"><input id="scrub" type="range" min="0" max="0" value="0" aria-label="Decision"><span class="time" id="time">0 / 0</span></div>
+      </div>
+      <div class="note" id="mapnote"></div>
+    </div>
+
+    <div class="panel">
+      <div class="box">
+        <h2>Episodes</h2>
+        <div class="eps" id="eps"></div>
+      </div>
+      <div class="box">
+        <h2>Now</h2>
+        <div class="now" id="now"></div>
+        <div class="hp" id="hp"></div>
+      </div>
+      <div class="box">
+        <h2>What the learners did</h2>
+        <div class="mix" id="mix"></div>
+        <p class="note">A swing locks the character for about 0.26 s, so the swing is unavailable on the next decision; a "wait" after a swing is that lock.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script id="replay-data" type="application/json">/*__DATA__*/</script>
+<script>
+(function () {
+  var DATA = JSON.parse(document.getElementById('replay-data').textContent);
+  var SLOTS, NS, LEARNERS, ACT0;                 // of the episode on show
+  var PER = 6;                                   // x, y, health, alive, facing, knockback per slot
+  var W, H, img = new Image(), mapPng = null;
+  // Each map is drawn plain: every cell by whether it can be walked and seen through, as an agent
+  // perceives the terrain, and its points. The game's pictures are not in the package: the client
+  // plays a replay file as the game draws it (java -jar saga-client.jar -replay FILE).
+  var KEY = '<span><i style="background:#d8d2bf"></i>walked and seen through</span>' +
+    '<span><i style="background:#7aa7c7"></i>seen through, not walked (water, a pit, a chasm, a cliff, a trunk, a fence)</span>' +
+    '<span><i style="background:#3a3833"></i>neither (a wall, a house, a boulder)</span>' +
+    '<span><i style="background:#c4452c"></i>spawn, in its team\'s colour</span>' +
+    '<span><i style="background:transparent;border:2px solid #d4a017"></i>capture point</span>' +
+    '<span><i style="background:#e0a020"></i>shop</span>' +
+    '<span><i style="background:#e06a1e"></i>bounce, its line the way it throws</span>' +
+    '<span><i style="background:transparent;border:2px solid #8a4fd0"></i>teleport, dotted to where it lands</span>' +
+    '<span><i style="background:transparent;border:none;color:#b0282a;font-style:normal;font-weight:600;line-height:11px">&times;</i>monster home</span>';
+  function useMap(E) {                           // the episode's own map, where the file holds several
+    var M = (E.map && DATA.maps && DATA.maps[E.map]) || DATA.map;
+    W = M.w; H = M.h;
+    var src = M.plain;
+    var note = document.getElementById('mapnote');
+    note.className = 'note mapkey';
+    note.innerHTML = KEY;
+    if (mapPng !== src) { mapPng = src; img.src = src; }
+  }
+  function useEpisode(E) { SLOTS = E.slots; NS = SLOTS.length; LEARNERS = E.learners; ACT0 = 1 + PER * NS; useMap(E); }
+  useEpisode(DATA.episodes[0]);
+  var DIRS = [[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]];
+  var DIRN = ['N','NE','E','SE','S','SW','W','NW'];
+  var canvas = document.getElementById('map'), ctx = canvas.getContext('2d');
+  var ep = 0, frame = 0, playing = false, last = 0, acc = 0;
+  var scrub = document.getElementById('scrub'), timeEl = document.getElementById('time');
+  var playBtn = document.getElementById('play'), speedSel = document.getElementById('speed');
+  function tok(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function teamColor(t) { return tok('--t' + Math.min(4, Math.max(1, t || 1))); }
+  function sx(f, s) { return f[1 + PER * s]; }   function sy(f, s) { return f[2 + PER * s]; }
+  function sh(f, s) { return f[3 + PER * s]; }   function salive(f, s) { return f[4 + PER * s]; }
+  function sface(f, s) { return f[5 + PER * s]; } function skb(f, s) { return f[6 + PER * s]; }
+  function act(f, k) { return f[ACT0 + k]; }
+
+  function actionName(a) {
+    if (a === undefined || a < 0) return 'episode over';
+    if (a === 0) return 'wait';
+    if (a >= 1 && a <= 8) return 'move ' + DIRN[a - 1];
+    if (a === 9) return 'stop';
+    if (a >= 10 && a <= 18) return 'select slot ' + (a - 9);
+    if (a === 19 || (a >= 20 && a < 20 + NS)) return 'swing';
+    return 'other (' + a + ')';
+  }
+  function isSwing(a) { return a === 19 || (a >= 20 && a < 20 + NS); }
+  function cardinal(d) { return (d === 0 || d === 1 || d === 7) ? 0 : (d === 2) ? 2 : (d === 6) ? 6 : 4; }
+
+  function fit() {
+    var dpr = window.devicePixelRatio || 1;
+    var cw = canvas.clientWidth || 960;
+    var ch = Math.round(cw * H / W);
+    canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
+    canvas.style.height = ch + 'px';
+    ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0);
+  }
+
+  function draw() {
+    var E = DATA.episodes[ep], fr = E.frames, f = fr[frame], prev = fr[Math.max(0, frame - 1)];
+    ctx.clearRect(0, 0, W, H);
+    if (img.complete) ctx.drawImage(img, 0, 0, W, H);
+    ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(0, 0, W, H);
+    for (var k = Math.max(0, frame - 40); k < frame; k++) {        // trails of the last 40 decisions
+      var a = (k - (frame - 40)) / 40;
+      ctx.globalAlpha = 0.12 + 0.5 * a;
+      for (var s = 0; s < NS; s++) {
+        ctx.fillStyle = teamColor(SLOTS[s].team); ctx.beginPath(); ctx.arc(sx(fr[k], s), sy(fr[k], s), 2.2, 0, 6.283); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+    LEARNERS.forEach(function (s, k) {                                // the swing box in front of a learner on a swing decision
+      var a = act(f, k);
+      if (!isSwing(a)) return;
+      var c = cardinal(sface(f, s)), x = sx(f, s), y = sy(f, s), bx, by, bw, bh;
+      if (c === 0) { bx = x - 10; by = y - 18; bw = 20; bh = 18; }
+      else if (c === 4) { bx = x - 10; by = y; bw = 20; bh = 18; }
+      else if (c === 2) { bx = x; by = y - 10; bw = 18; bh = 20; }
+      else { bx = x - 18; by = y - 10; bw = 18; bh = 20; }
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.strokeStyle = teamColor(SLOTS[s].team); ctx.lineWidth = 1.2;
+      ctx.fillRect(bx, by, bw, bh); ctx.strokeRect(bx, by, bw, bh);
+    });
+    for (var s2 = 0; s2 < NS; s2++) {
+      drawChar(sx(f, s2), sy(f, s2), sh(f, s2), salive(f, s2), sface(f, s2), teamColor(SLOTS[s2].team),
+               sh(prev, s2) > sh(f, s2), skb(f, s2), LEARNERS.indexOf(s2) >= 0);
+    }
+  }
+  function drawChar(x, y, hp, alive, facing, color, hit, kb, learner) {
+    ctx.save();
+    if (!alive) ctx.globalAlpha = 0.35;
+    if (hit) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, 13, 0, 6.283); ctx.stroke(); }
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y, 7, 0, 6.283); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1; ctx.stroke();
+    if (learner) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 9.5, 0, 6.283); ctx.stroke(); }
+    if (facing >= 0 && facing < 8) {
+      var d = DIRS[facing]; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + d[0] * 11, y + d[1] * 11); ctx.stroke();
+    }
+    if (kb) { ctx.strokeStyle = color; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.arc(x, y, 12, 0, 6.283); ctx.stroke(); ctx.setLineDash([]); }
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x - 12, y - 18, 24, 4);
+    ctx.fillStyle = color; ctx.fillRect(x - 12, y - 18, 24 * Math.max(0, Math.min(100, hp)) / 100, 4);
+    ctx.restore();
+  }
+
+  function readout() {
+    var E = DATA.episodes[ep], f = E.frames[frame], n = E.frames.length - 1;
+    scrub.max = n; scrub.value = frame;
+    timeEl.textContent = frame + ' / ' + n;
+    var now = document.getElementById('now'), rows = [];
+    rows.push(['decision', frame + ' of ' + n], ['game time', (frame * DATA.seconds_per_decision).toFixed(1) + ' s']);
+    LEARNERS.forEach(function (s, k) { rows.push([SLOTS[s].name, actionName(act(f, k))]); });
+    if (NS === 2) {
+      var dx = sx(f, 0) - sx(f, 1), dy = sy(f, 0) - sy(f, 1);
+      rows.push(['distance', Math.round(Math.sqrt(dx * dx + dy * dy)) + ' px']);
+    }
+    now.innerHTML = rows.map(function (r) { return '<span>' + r[0] + '</span><span>' + r[1] + '</span>'; }).join('');
+    var hp = document.getElementById('hp');
+    hp.innerHTML = SLOTS.map(function (S, s) {
+      return '<div class="lbl"><span>' + S.name + '</span><span>' + sh(f, s) + '</span></div><div class="bar"><i style="background:' + teamColor(S.team) + ';width:' + Math.max(0, Math.min(100, sh(f, s))) + '%"></i></div>';
+    }).join('');
+  }
+
+  function legend() {
+    document.getElementById('legend').innerHTML = SLOTS.map(function (S, s) {
+      var learner = LEARNERS.indexOf(s) >= 0;
+      return '<span style="color:' + teamColor(S.team) + '"><i class="' + (learner ? 'learner' : '') + '" style="background:' + teamColor(S.team) + '"></i><span style="color:var(--muted)">' + S.name + (learner ? ' (learner)' : '') + '</span></span>';
+    }).join('') + '<span>one decision = ' + DATA.seconds_per_decision + ' s of game time</span>';
+  }
+
+  function show(i) {
+    ep = i; frame = 0; stop();
+    useEpisode(DATA.episodes[ep]); fit(); legend();
+    document.querySelectorAll('.ep').forEach(function (b, k) { b.setAttribute('aria-pressed', k === i ? 'true' : 'false'); });
+    var E = DATA.episodes[ep], mix = document.getElementById('mix'); mix.innerHTML = '';
+    LEARNERS.forEach(function (s, k) {
+      var counts = { swing: 0, wait: 0, move: 0, stop: 0, other: 0 }, total = 0;
+      for (var t = 0; t < E.frames.length - 1; t++) {
+        var a = act(E.frames[t], k);
+        var g = isSwing(a) ? 'swing' : a === 0 ? 'wait' : (a >= 1 && a <= 8) ? 'move' : a === 9 ? 'stop' : 'other';
+        counts[g]++; total++;
+      }
+      if (LEARNERS.length > 1) { var h = document.createElement('h3'); h.textContent = SLOTS[s].name; mix.appendChild(h); }
+      ['swing', 'wait', 'move', 'stop', 'other'].forEach(function (g) {
+        var pct = total ? 100 * counts[g] / total : 0;
+        var row = document.createElement('div'); row.className = 'row';
+        row.innerHTML = '<span>' + g + '</span><div class="bar"><i style="width:' + pct.toFixed(1) + '%;background:' + teamColor(SLOTS[s].team) + '"></i></div><span class="n">' + pct.toFixed(0) + '%</span>';
+        mix.appendChild(row);
+      });
+    });
+    readout(); draw();
+  }
+
+  function stop() { playing = false; playBtn.textContent = 'Play'; }
+  function toggle() { if (frame >= DATA.episodes[ep].frames.length - 1) frame = 0; playing = !playing; playBtn.textContent = playing ? 'Pause' : 'Play'; last = 0; acc = 0; if (playing) requestAnimationFrame(tick); }
+  function tick(t) {
+    if (!playing) return;
+    if (last) acc += (t - last) * parseFloat(speedSel.value);
+    last = t;
+    var n = DATA.episodes[ep].frames.length - 1, moved = false, ms = 1000 * DATA.seconds_per_decision;
+    while (acc >= ms && frame < n) { acc -= ms; frame++; moved = true; }
+    if (moved) { readout(); draw(); }
+    if (frame >= n) { stop(); return; }
+    requestAnimationFrame(tick);
+  }
+  function step(d) { stop(); var n = DATA.episodes[ep].frames.length - 1; frame = Math.min(n, Math.max(0, frame + d)); readout(); draw(); }
+
+  document.getElementById('intro').textContent = DATA.intro || '';
+
+  var eps = document.getElementById('eps');
+  DATA.episodes.forEach(function (E, i) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'ep'; b.setAttribute('aria-pressed', 'false');
+    b.innerHTML = '<span class="name">' + E.label + '</span><span class="chip ' + E.resultClass + '">' + E.result + '</span><span class="sub">' + E.summary + '</span>';
+    b.addEventListener('click', function () { show(i); });
+    eps.appendChild(b);
+  });
+  playBtn.addEventListener('click', toggle);
+  document.getElementById('back').addEventListener('click', function () { step(-1); });
+  document.getElementById('fwd').addEventListener('click', function () { step(1); });
+  scrub.addEventListener('input', function () { stop(); frame = parseInt(scrub.value, 10) || 0; readout(); draw(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
+    if (e.code === 'Space') { e.preventDefault(); toggle(); }
+    else if (e.code === 'ArrowLeft') step(-1); else if (e.code === 'ArrowRight') step(1);
+  });
+  window.addEventListener('resize', function () { fit(); draw(); });
+  img.onload = function () { draw(); };
+  fit(); show(0);
+})();
+</script>

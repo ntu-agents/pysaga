@@ -1,0 +1,46 @@
+Published from the development repository by ./run-local.sh publish.
+Edit these files there; the next publish rewrites them.
+
+build: 5f7c346-20261103115443
+version: 0.1.795
+demo state hash: -8876696378546793987
+date: 2026-11-03 11:57
+
+published paths:
+  .github/workflows/wheel.yml
+  .gitignore
+  LICENSE
+  LICENSE-SIMULATION.md
+  NOTICE
+  PUBLISHED.txt
+  README.md
+  docs/ADMIN_COMMANDS.md
+  docs/abilities.md
+  docs/logo.png
+  docs/maps/llm-prompt.md
+  docs/maps/saga-map.md
+  docs/maps/saga-map.schema.json
+  docs/rl-quickstart.md
+  docs/rl-reference.md
+  pyproject.toml
+  pysaga/__init__.py
+  pysaga/balance.py
+  pysaga/bridge.py
+  pysaga/conformance.py
+  pysaga/dataset.py
+  pysaga/demo.py
+  pysaga/env.py
+  pysaga/epymarl/__init__.py
+  pysaga/epymarl/__main__.py
+  pysaga/epymarl/check_vec_runner.py
+  pysaga/epymarl/saga.yaml
+  pysaga/epymarl/saga_learner.py
+  pysaga/epymarl/saga_wrapper.py
+  pysaga/epymarl/vec_runner.py
+  pysaga/export.py
+  pysaga/imitate.py
+  pysaga/normalise.py
+  pysaga/offline.py
+  pysaga/replay.py
+  pysaga/replay_viewer.html
+  pysaga/vec.py

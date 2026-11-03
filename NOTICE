@@ -1,0 +1,17 @@
+pysaga
+Copyright 2026 NTU Autonomous Agents Research Group
+
+pysaga's Python code and documentation are licensed under the Apache License,
+Version 2.0 (LICENSE).
+
+The simulation and the game data bundled in the package (pysaga/_data) are not.
+They are licensed under the terms in LICENSE-SIMULATION.md: free for
+non-commercial use, as part of pysaga only.
+
+pysaga/epymarl/vec_runner.py and pysaga/epymarl/saga_learner.py follow and extend
+EPyMARL (https://github.com/uoe-agents/epymarl), which is licensed under the
+Apache License, Version 2.0.
+
+Maps, configurations and policies contributed to the maps/, configs/ and policies/
+folders of the repository are licensed under Creative Commons Attribution 4.0
+International (CC BY 4.0), unless the contribution says otherwise.

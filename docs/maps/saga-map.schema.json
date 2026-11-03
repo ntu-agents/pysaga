@@ -1,0 +1,646 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:saga-online:saga-map:1",
+  "title": "Saga Online map (saga-map, version 1)",
+  "description": "A map for Saga Online: terrain painted in layers, objects placed on it, and the points the game uses. Cells are blocks of 16 pixels; x runs from the left, y from the top. The game's reader is the judge: it also checks that every point stands on walkable ground and every walkable cell can be reached.",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "saga-map"
+    },
+    "version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "description": {
+      "type": "string"
+    },
+    "author": {
+      "type": "string"
+    },
+    "size": {
+      "type": "array",
+      "description": "[width, height] in cells of 16 pixels",
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 512
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "tileset": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "features beyond version 1 the map needs"
+    },
+    "rules": {
+      "type": "object",
+      "properties": {
+        "teams": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/team"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/team"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
+        "modes": {
+          "type": "array",
+          "items": {
+            "enum": ["dm", "tdm", "dom", "ma"]
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "terrain": {
+      "type": "object",
+      "properties": {
+        "fill": {
+          "$ref": "#/$defs/terrain"
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/terrain"
+                  },
+                  "rect": {
+                    "$ref": "#/$defs/rect"
+                  }
+                },
+                "required": ["kind", "rect"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/terrain"
+                  },
+                  "ellipse": {
+                    "$ref": "#/$defs/ellipse"
+                  }
+                },
+                "required": ["kind", "ellipse"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/terrain"
+                  },
+                  "polygon": {
+                    "$ref": "#/$defs/polygon"
+                  }
+                },
+                "required": ["kind", "polygon"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/terrain"
+                  },
+                  "path": {
+                    "$ref": "#/$defs/path"
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 64
+                  }
+                },
+                "required": ["kind", "path"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "description": "rows of equal length; a character not in the legend leaves the cell as it was"
+                  },
+                  "at": {
+                    "$ref": "#/$defs/corner"
+                  },
+                  "legend": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/$defs/terrain"
+                    },
+                    "propertyNames": {
+                      "minLength": 1,
+                      "maxLength": 1
+                    }
+                  }
+                },
+                "required": ["rows", "at", "legend"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": ["tree", "oak", "stump", "rock", "bush", "flowers", "sign", "barrel", "campfire", "well", "statue", "tent", "crystal", "crystals", "stalagmite", "ice-spire", "boulder", "torch", "gargoyle", "skulls", "tombstone", "embers", "rubble", "pine", "pine-large", "maple", "maple-large", "dead-tree", "dead-tree-large"]
+              },
+              "fallback": {
+                "enum": ["tree", "oak", "stump", "rock", "bush", "flowers", "sign", "barrel", "campfire", "well", "statue", "tent", "house", "wall", "fence", "plateau", "crystal", "crystals", "stalagmite", "ice-spire", "boulder", "torch", "gargoyle", "skulls", "tombstone", "embers", "rubble", "pine", "pine-large", "maple", "maple-large", "dead-tree", "dead-tree-large"]
+              },
+              "at": {
+                "$ref": "#/$defs/cell"
+              },
+              "variant": {
+                "enum": ["green", "dark", "teal", "blue", "yellow", "red", "orange", "bare", "frost"],
+                "description": "how the object looks, of the variants its kind has; its first when left out"
+              }
+            },
+            "required": ["type", "at"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": ["house"]
+              },
+              "fallback": {
+                "enum": ["tree", "oak", "stump", "rock", "bush", "flowers", "sign", "barrel", "campfire", "well", "statue", "tent", "house", "wall", "fence", "plateau", "crystal", "crystals", "stalagmite", "ice-spire", "boulder", "torch", "gargoyle", "skulls", "tombstone", "embers", "rubble", "pine", "pine-large", "maple", "maple-large", "dead-tree", "dead-tree-large"]
+              },
+              "at": {
+                "$ref": "#/$defs/cell"
+              },
+              "size": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "variant": {
+                "enum": ["orange", "teal"]
+              },
+              "door": {
+                "enum": ["S"]
+              },
+              "sign": {
+                "enum": ["inn", "pub"],
+                "description": "a sign over the door; none when left out"
+              }
+            },
+            "required": ["type", "at", "size"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": ["plateau"]
+              },
+              "fallback": {
+                "enum": ["tree", "oak", "stump", "rock", "bush", "flowers", "sign", "barrel", "campfire", "well", "statue", "tent", "house", "wall", "fence", "plateau", "crystal", "crystals", "stalagmite", "ice-spire", "boulder", "torch", "gargoyle", "skulls", "tombstone", "embers", "rubble", "pine", "pine-large", "maple", "maple-large", "dead-tree", "dead-tree-large"]
+              },
+              "at": {
+                "$ref": "#/$defs/cell"
+              },
+              "size": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "[w, h]: the whole plateau, its cliff face the bottom rows"
+              },
+              "variant": {
+                "enum": ["earth", "lava", "ice", "grass"]
+              },
+              "cut": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "[west, east]: how many columns the face slants back at each end, a row higher a column further out"
+              },
+              "ramps": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 511
+                },
+                "description": "the columns (x) of the face where it can be climbed, inside the west and east edges"
+              }
+            },
+            "required": ["type", "at", "size"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": ["wall", "fence"]
+              },
+              "fallback": {
+                "enum": ["tree", "oak", "stump", "rock", "bush", "flowers", "sign", "barrel", "campfire", "well", "statue", "tent", "house", "wall", "fence", "plateau", "crystal", "crystals", "stalagmite", "ice-spire", "boulder", "torch", "gargoyle", "skulls", "tombstone", "embers", "rubble", "pine", "pine-large", "maple", "maple-large", "dead-tree", "dead-tree-large"]
+              },
+              "path": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/cell"
+                },
+                "minItems": 2,
+                "description": "corners; every leg horizontal or vertical"
+              }
+            },
+            "required": ["type", "path"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "scatter": {
+                "enum": ["tree", "oak", "stump", "rock", "bush", "flowers", "sign", "barrel", "campfire", "well", "statue", "tent", "crystal", "crystals", "stalagmite", "ice-spire", "boulder", "torch", "gargoyle", "skulls", "tombstone", "embers", "rubble", "pine", "pine-large", "maple", "maple-large", "dead-tree", "dead-tree-large"]
+              },
+              "area": {
+                "$ref": "#/$defs/area"
+              },
+              "permille": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "seed": {
+                "type": "integer"
+              },
+              "variant": {
+                "enum": ["green", "dark", "teal", "blue", "yellow", "red", "orange", "bare", "frost"]
+              }
+            },
+            "required": ["scatter", "area", "permille"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "points": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "spawn"
+              },
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "$ref": "#/$defs/cell"
+              },
+              "team": {
+                "$ref": "#/$defs/team"
+              }
+            },
+            "required": ["type", "at"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "capture"
+              },
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "$ref": "#/$defs/cell"
+              },
+              "team": {
+                "$ref": "#/$defs/team"
+              }
+            },
+            "required": ["type", "at"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "shop"
+              },
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "$ref": "#/$defs/cell"
+              },
+              "stock": {
+                "oneOf": [
+                  {
+                    "enum": ["all", "skill", "equipment", "small", "medium", "large"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": ["items"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": ["type", "at"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "bounce"
+              },
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "$ref": "#/$defs/cell"
+              },
+              "dir": {
+                "oneOf": [
+                  {
+                    "enum": ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": -64,
+                      "maximum": 64
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                ]
+              },
+              "power": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4096
+              }
+            },
+            "required": ["type", "at", "dir", "power"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "teleport"
+              },
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "$ref": "#/$defs/cell"
+              },
+              "to": {
+                "$ref": "#/$defs/cell"
+              }
+            },
+            "required": ["type", "at", "to"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "monster"
+              },
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "$ref": "#/$defs/cell"
+              },
+              "kind": {
+                "enum": ["slime", "skeleton", "pig", "golem", "blue-slime", "red-slime", "bull"]
+              },
+              "leash": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64,
+                "description": "how far it follows a player from home, in cells; the kind's own when absent"
+              }
+            },
+            "required": ["type", "at", "kind"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "ambient"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": ["chicken", "dog", "sheep", "cow", "horse", "villager"]
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 16
+              },
+              "area": {
+                "$ref": "#/$defs/area"
+              }
+            },
+            "required": ["type", "kind", "area"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "generator": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "spec": {
+          "type": ["string", "object"]
+        },
+        "seed": {
+          "type": "integer"
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "meta": {}
+  },
+  "required": ["format", "version", "name", "size", "points"],
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x_": {}
+  },
+  "$defs": {
+    "cell": {
+      "type": "array",
+      "description": "[x, y]: a cell, x from the left and y from the top",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 511
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "corner": {
+      "type": "array",
+      "description": "[x, y]: may lie outside the map; shapes are clipped to it",
+      "items": {
+        "type": "integer",
+        "minimum": -512,
+        "maximum": 1024
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "terrain": {
+      "enum": ["grass", "dirt", "sand", "road", "stone", "field", "snow", "water", "pit", "lava-rock", "lava", "cave", "chasm", "earth", "slate", "ice", "bridge-ew", "bridge-ns"]
+    },
+    "rect": {
+      "type": "array",
+      "description": "[x, y, width, height]",
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "ellipse": {
+      "type": "array",
+      "description": "[cx, cy, rx, ry]: cells within rx and ry of the centre cell",
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "polygon": {
+      "type": "array",
+      "description": "corners on the grid lines; a cell is inside when its centre is",
+      "items": {
+        "$ref": "#/$defs/corner"
+      },
+      "minItems": 3
+    },
+    "path": {
+      "type": "array",
+      "description": "cells; each leg steps along x, then y, so the path is 4-connected",
+      "items": {
+        "$ref": "#/$defs/corner"
+      },
+      "minItems": 1
+    },
+    "area": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "rect": {
+              "$ref": "#/$defs/rect"
+            }
+          },
+          "required": ["rect"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ellipse": {
+              "$ref": "#/$defs/ellipse"
+            }
+          },
+          "required": ["ellipse"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "polygon": {
+              "$ref": "#/$defs/polygon"
+            }
+          },
+          "required": ["polygon"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "team": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+    }
+  }
+}
