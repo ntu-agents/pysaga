@@ -2,7 +2,8 @@
 
 This page explains how Saga Online works as a reinforcement learning environment, and
 lists every option it accepts. If you are new to it, start with
-[the tutorial](rl-quickstart.md).
+[the tutorial](rl-quickstart.md). Learning from an expert's decisions (behaviour cloning,
+DAgger, offline RL, starting IPPO from a clone) has [a page of its own](imitation.md).
 
 1. [The game as a POSG](#1-the-game-as-a-posg)
 2. [Actions](#2-actions)
@@ -33,6 +34,8 @@ to a default and trains a different game from the one you asked for.
 | `scripted` | none | [Bots](#bots) |
 | `monsters` | `0` | [Monsters](#monsters) |
 | `frame_skip` | `4` | [Time](#time) |
+| `time_limit`, `score_limit`, `cutoff`, `lives` | `300`, the mode's own, none, `5` | [How an episode ends](#how-an-episode-ends) |
+| `normalise` | none | [Normalised inputs](#normalised-inputs) |
 | `seed` | none | [Seeds](#seeds) |
 | `root` | none | [Where the game's data is](#where-the-games-data-is) |
 | `n_envs`, `parallel`, `auto_reset` (`VecSagaEnv` only) | required, `True`, `False` | [Many worlds in one call](#many-worlds-in-one-call) |
@@ -79,18 +82,17 @@ happens.
 | --- | --- |
 | tick (one step of the simulation) | 50 ms |
 | decision (one call to `step()`) | `frame_skip` ticks, 4 by default = 200 ms |
-| episode | at most 300 s of game time = 6000 ticks (1500 decisions at 4 ticks, 3000 at 2) |
+| episode | 300 s of game time by default (`time_limit`) = 6000 ticks (1500 decisions at 4 ticks, 3000 at 2) |
 | respawn after a death | 6 s for a player character; for monsters it depends on the kind ([section 6](#monsters)) |
 
 An agent's action is applied on the first tick of the decision. Movement is "latched". A
 move order keeps the character walking through the decision's remaining ticks and on
 through later decisions, until the agent gives another move or a stop.
 
-The tick length and the episode's length in game time are fixed. The decision length is
-yours: `frame_skip=2` decides every 100 ms, and an episode then holds 3000 decisions. The
+The tick length and the episode's length in game time are fixed. You choose the decision length.
+With `frame_skip=2` an agent decides every 100 ms, and an episode then holds 3000 decisions. The
 reward's time cost is per tick of play, so it costs the same per second at any rate. The
-built-in bots are tuned for 4. A trained policy decides at the rate it was trained at, also
-in a bot's slot: one trained at 2 ticks, in an environment of 4, decides twice per step, and
+built-in bots are tuned for 4. A trained policy decides at the rate it was trained at, also in a bot's slot. One trained at 2 ticks, in an environment of 4, decides twice per step, and
 the terminal shows a warning naming the slot and its rate. A discount factor looks half
 as far in game time at 2 ticks as at 4.
 
@@ -99,12 +101,17 @@ as far in game time at 2 ticks as at 4.
 `mode` chooses the scenario. `team_size` sets the number of players on each side in the
 two team modes.
 
-| `mode` | sides | characters | character types | the episode ends when |
+| `mode` | sides | characters | character types | the score, and its default limit |
 | --- | --- | --- | --- | --- |
-| `"duel"` (or `"dm"`) | every character is its own side | 2, in slots 0 and 1 | slot 0 is a warrior, slot 1 a magician | a character has 3 kills |
-| `"tdm"` (or `"team_deathmatch"`) | teams 1 and 2 | 2 x `team_size`; slot *i* plays for team 1 + (*i* mod 2) | team 1 are warriors, team 2 magicians | a team has 10 kills |
-| `"dom"` (or `"domination"`) | teams 1 and 2 | as in `"tdm"` | as in `"tdm"` | a team has 30 points |
-| `"ma"` (or `"monster_attack"`) | team 1, against the monsters | `team_size`, all on team 1 | warriors and magicians by turns | the team has killed 30 monsters |
+| `"duel"` (or `"dm"`) | every character is its own side | 2, in slots 0 and 1 | slot 0 is a warrior, slot 1 a magician | a character's score, 3 |
+| `"tdm"` (or `"team_deathmatch"`) | teams 1 and 2 | 2 x `team_size`; slot *i* plays for team 1 + (*i* mod 2) | team 1 are warriors, team 2 magicians | the team's players' scores, 10 |
+| `"dom"` (or `"domination"`) | teams 1 and 2 | as in `"tdm"` | as in `"tdm"` | the team's points, 30 |
+| `"ma"` (or `"monster_attack"`) | team 1, against the monsters | `team_size`, all on team 1 | warriors and magicians by turns | monsters the team killed, 30 |
+| `"ctf"` (or `"capture_the_flag"`) | teams 1 and 2 | as in `"tdm"` | as in `"tdm"` | the flags the team carried home, 3 |
+
+**A score** in a duel and in `"tdm"` is the sum of the levels of the players a character killed, each taken at its death. A kill of
+a level 4 player scores 4. A death nobody caused (a
+bounce tile, the Elixir of Death) scores nothing. Kills are counted apart from it.
 
 Every character occupies a numbered **slot** in the world. Slots matter for naming bots
 ([section 6](#bots)) and for the order in which characters appear in observations.
@@ -116,20 +123,51 @@ Every character occupies a numbered **slot** in the world. Slots matter for nami
 - **Domination.** A team captures a point when exactly one team has a living character
   within 30 px of it for 5 seconds without a break. If both teams stand on it, the count
   stops. Each point a team holds earns it 1 point per second.
-- **Monster Attack.** All agents play on one team against monsters the game spawns. It spawns one
-  every 6 seconds while fewer than 4 are up, each at one of the map's monster homes (the
-  map must have at least one), its kind drawn among the four, and one in ten a **Mega
-  Monster** with 3 x the health, 2 x the strength and 4 x the reward of its kind. A monster
+- **Capture the flag.** Each team's flag stands at its base, a `flag` point of the map (the
+  map needs one for each team; the shipped maps and every generated one have them). A
+  player takes another team's flag by walking within 16 px of it, and scores 1 for its team
+  by carrying it within 16 px of its own base while its own flag stands there; the scored
+  flag goes home 5 seconds later. A carrier that dies, leaves, changes team or turns
+  invisible drops the flag where it stands; a player of the flag's team who reaches it
+  returns it home, and untouched it goes home after 15 seconds. A player carries one flag at a time. When two players could take a
+  flag, the nearer one takes it, and a player returning a flag goes before one taking it. Every
+  agent sees whether it carries a flag, whether each other character does (`carrying`,
+  status), and each team's flag in four places of its own block (`flag1:` to `flag4:`). These say where the flag is (gated
+  by position, tested where the flag is), its state (home, carried, dropped, away) and
+  whether it is the agent's team's flag. The critic's state holds every
+  flag's state and place.
+- **Monster Attack.** All agents play on one team against monsters the game spawns. It spawns one every 6 seconds while fewer
+  than 4 are up. Over the round this rises in a straight line, to one every 2 seconds and 12
+  up at the round's end (at most the size of the pool). Each monster spawns at one of the map's
+  monster homes (the map must have at least one), its kind is drawn among the seven, and one in
+  ten is a **Mega Monster** with 3 x the health, 2 x the strength and 4 x the reward of its kind. A monster
   picks a living player to hunt -- a player already hunted by *a* monsters weighs
   1 / (1 + *a*)<sup>2</sup>, so the least hunted are the likeliest -- and keeps it until one
   of the two dies; then it picks again. Its slot is freed 2 seconds after it dies, for
-  the next spawn. The pool's 8 slots come after the agents' (`monsters=n` sets another
-  size); each is a block of the observation, all zeros while empty. Every monster killed
-  scores a point for the team.
-- **How an episode ends.** It **terminates** when a side reaches the score limit in the
-  table above. It is **truncated** (cut off by the time limit) after the 1500th decision.
-  If two sides reach the limit on the same decision, the episode is a **draw**. This is
-  common, because two characters can kill each other in the same tick.
+  the next spawn. The pool's 8 slots come after the agents' slots (`monsters=n` sets another size). Each
+  slot is a block of the observation, all zeros while it is empty. Every monster killed scores
+  a point for the team. The team may die `lives` times for each player present (5 by default).
+  The death that uses up that budget ends the round as **overrun**, which means the team lost.
+
+### How an episode ends
+
+An episode is a round of the game, and the round runs on its clock. You choose its end:
+
+| option | meaning | default |
+| --- | --- | --- |
+| `time_limit` | seconds of game time the round lasts. At its end the mode names the winner and the episode is **terminated** | `300` |
+| `score_limit` | the round ends sooner, **terminated**, when a side's score reaches it. `None` is the mode's own (table above), `0` none | the mode's |
+| `cutoff` | seconds after which an episode is cut off with no winner, **truncated**; EPyMARL's `info["episode_limit"]` is then True | none |
+| `lives` | Monster Attack: deaths a player before the team is overrun | `5` |
+
+These are seconds, not decisions, so `frame_skip` does not change what they mean. A length that
+is not a whole number of decisions is refused, and so is an episode with neither a time limit
+nor a cutoff. **The winner** in a duel is the character with the most score, then the most
+kills, then the fewest deaths. In `"tdm"` the same rules apply to the team totals. In
+domination the team with the most points wins, in capture the flag the team with the most
+flags carried home, and in Monster Attack the team wins unless it was overrun. Sides still equal are a **draw** -- common in a
+duel, because two characters can kill each other in the same tick, and in a round where
+nobody scored.
 - **A death does not end the episode.** The character comes back 6 seconds later at its
   spawn point with full health. It keeps its learned abilities and its points.
 
@@ -144,7 +182,7 @@ Every character occupies a numbered **slot** in the world. Slots matter for nami
 | `get_obs()`, `get_obs_agent(i)`, `get_obs_size()` | the observations ([section 3](#3-observations)) |
 | `get_state()`, `get_state_size()` | the state for a centralised critic ([The state for a centralised critic](#the-state-for-a-centralised-critic)) |
 | `get_avail_actions()`, `get_avail_agent_actions(i)`, `get_total_actions()` | the action masks and the number of actions ([section 2](#2-actions)) |
-| `get_env_info()` | `state_shape`, `obs_shape`, `n_actions`, `n_agents`, `episode_limit` (1500) |
+| `get_env_info()` | `state_shape`, `obs_shape`, `n_actions`, `n_agents`, `episode_limit` (the most decisions an episode lasts: 1500 by default) |
 | `get_stats()` | the episode's figures, including one list entry per learner |
 
 Learners are numbered in slot order, skipping the slots played by bots. For example, with
@@ -172,7 +210,7 @@ In the table, *t* = C - 1 is the number of possible targets:
 
 | index | action | legal when |
 | --- | --- | --- |
-| 0 | **no-op**, which changes nothing (a latched move continues) | always. It is the only legal action while the character is dead or stunned |
+| 0 | **no-op**, which changes nothing (a latched move continues) | always. It is the only legal action while the character is dead, stunned or thrown |
 | 1-8 | **move** N, NE, E, SE, S, SW, W or NW. The character keeps walking that way until it gets another move or a stop | alive and not stunned |
 | 9 | **stop** walking | alive and not stunned |
 | 10-18 | **select** hotbar slot 0-8 as the ability to use | the slot holds an ability |
@@ -212,6 +250,12 @@ In all three cases a character starts with 100 health, 10 strength and 10 intell
 (its starting weapon adds 2 to its type's own stat), 1 ability point, 2 skill points,
 10 coins, a Small Health Potion and its type's first weapon.
 
+**Strength and intelligence** are shown in the game as **Power** and **Focus**; the
+observation and the tables keep the names strength and intelligence. They matter the same
+way for both types: a weapon strike (the basic strike, a monster's bite, a shield's
+counter-damage) scales with the attacker's strength, and every other damaging ability
+with the caster's intelligence.
+
 **`kit="basic"` matches the game.** It is exactly what a character has when it enters a
 round in the real game. So if you want a policy to play in the game as a bot that starts
 like a player ("player mode", [section 9](#9-exporting-evaluating-watching-and-playing-against-a-trained-policy)), train it with
@@ -231,11 +275,15 @@ With `progression=True`, an agent builds its own character during the episode:
   The first time it learns an ability of an element (anything but neutral), it commits to
   that element, and the rows of the other three elements stay closed until the episode ends.
 - **Cost.** Every ability costs 1 ability point. Every ability after the first in a row
-  also requires a minimum of the character's own stat (strength for a warrior,
-  intelligence for a magician), which is 14 for the second ability of a row, 16 for the third and
-  18 for the fourth. The rows both types share (the Strikes, the Surges and the element
-  auras) have no stat requirement. The requirement only applies when learning, so an ability
-  already learned stays usable.
+  also requires minimums of strength and intelligence. An ability of the character's own
+  type asks its type's stat (strength for a warrior, intelligence for a magician): 14 for
+  the second ability of a row, 16 for the third and 18 for the fourth; from the third on it
+  also asks the other stat, 12 and then 14. An ability both types share (the Strikes, the
+  Surges and the element auras) asks both stats alike, 12 and then 14. What a buff, a
+  channel or a potion lends does not count toward a requirement; skill points and the
+  weapon in hand do. The requirement only applies when learning, so an ability already
+  learned stays usable. Each ability's requirement is in the
+  [abilities and weapons reference](abilities.md).
 - **Points and levels.** Each new level gives 1 ability point and 2 skill points.
   Spending a skill point gives +10 maximum health (and +10 health), +1 strength, or +1
   intelligence. Characters gain experience by dealing damage. Level 2 takes 10
@@ -251,8 +299,8 @@ weapon's are in the [abilities and weapons reference](abilities.md).
 | --- | --- | --- | --- |
 | 0 | neutral | Strike 1-3 | Strike 1-3 |
 | 1 | neutral | Life Surge 1-2, Life Spring 1-2 | Life Surge 1-2, Life Drain 1-2 |
-| 2 | neutral | Strength Surge 1-2, Strength Spring 1-2 | Strength Surge 1-2, Strength Drain 1-2 |
-| 3 | neutral | Intelligence Surge 1-2, Intelligence Spring 1-2 | Intelligence Surge 1-2, Intelligence Drain 1-2 |
+| 2 | neutral | Power Surge 1-2, Power Spring 1-2 | Power Surge 1-2, Power Drain 1-2 |
+| 3 | neutral | Focus Surge 1-2, Focus Spring 1-2 | Focus Surge 1-2, Focus Drain 1-2 |
 | 4 | earth | Earth Aura 1-3 | Earth Aura 1-3 |
 | 5 | earth | Earthquake 1-3 | Earth Thrust 1-3 |
 | 6 | earth | Healing Spring 1-3 | Boulder 1-3 |
@@ -285,13 +333,13 @@ Agents can buy and use items in every scenario, with or without progression. Buy
 | --- | --- | --- |
 | 0 | Small Health Potion | 5 |
 | 1 | Large Health Potion | 15 |
-| 2 | Small Strength Potion | 10 |
-| 3 | Large Strength Potion | 25 |
-| 4 | Small Intelligence Potion | 10 |
-| 5 | Large Intelligence Potion | 25 |
+| 2 | Small Power Potion | 10 |
+| 3 | Large Power Potion | 25 |
+| 4 | Small Focus Potion | 10 |
+| 5 | Large Focus Potion | 25 |
 | 6 | Book of Life: raises maximum health | 60 |
-| 7 | Book of Strength: raises maximum strength | 70 |
-| 8 | Book of Intelligence: raises maximum intelligence | 70 |
+| 7 | Book of Power: raises maximum strength | 60 |
+| 8 | Book of Focus: raises maximum intelligence | 60 |
 | 9 | Book of Experience | 100 |
 | 10 | Elixir of Life: restores full health | 50 |
 | 11 | Elixir of Haste: +50% speed for 10 s | 20 |
@@ -319,9 +367,10 @@ does not perceive is set to zero and flagged as unknown, never removed. So the n
 input size does not depend on the mode, and a policy cannot tell which mode it is in from
 the length of its input. With *C* characters and a terrain radius *r*, the length is
 
-> **86 + 73 x (C - 1) + 2 x (2r + 1)<sup>2</sup>**
+> **120 + 74 x (C - 1) + 2 x (2r + 1)<sup>2</sup> + 1**
 
-That is 257 in a duel (with the default radius 3), 403 in a 2v2 and 695 in a 4v4.
+where the last number is the clock. That is 293 in a duel (with the default radius 3), 441 in
+a 2v2 and 737 in a 4v4.
 
 `env.describe_obs(i)` returns learner *i*'s observation as a dictionary
 `{field name: value}`, which is handy for checking what each number means.
@@ -331,7 +380,7 @@ That is 257 in a duel (with the default radius 3), 403 in a 2v2 and 695 in a 4v4
 The observation is the learner's own block, then one block for each other character in
 slot order (bots and monsters included), then the terrain patch.
 
-**The learner's own block** has 86 numbers and is always filled in:
+**The learner's own block** has 120 numbers and is always filled in:
 
 | fields | meaning and scale |
 | --- | --- |
@@ -344,6 +393,7 @@ slot order (bots and monsters included), then the terrain patch.
 | `locked` | 1 while the character is stunned or held in place |
 | `level` | the level divided by 20, at most 1 |
 | `kills`, `npc-kills` | players killed divided by 5, and monsters killed divided by 5, each at most 1 |
+| `score` | the character's score (the levels of the players it killed) divided by 20, at most 1 |
 | `type:warrior`, `type:magician` | the character type, one-hot |
 | `cat:neutral`, `cat:earth`, `cat:fire`, `cat:ice`, `cat:wind` | the element, one-hot |
 | `npc` | always 0, since a learner is never a monster |
@@ -357,8 +407,10 @@ slot order (bots and monsters included), then the terrain patch.
 | `sel:0` ... `sel:8` | the selected hotbar slot, one-hot |
 | `spell:*` (32 numbers) | which of the character's abilities are active ([Casts](#casts)) |
 | `cast0:*`, `cast1:*` (8 numbers each) | the character's moving casts ([Casts](#casts)) |
+| `carrying` | capture the flag: 1 while the learner carries a flag |
+| `flag1:*` ... `flag4:*` (8 numbers each) | capture the flag: each team's flag -- `known:position`, `dx`, `dy` (where it is, from the learner, in pixels divided by 2048, filled in when the learner perceives that place), `home`, `carried`, `dropped`, `away` (its state, one-hot) and `mine` (1 for the learner's own team's). All zeros in other modes and for a team the map gives no flag |
 
-**Each other character's block** has 73 numbers. They are grouped by **reveal group**.
+**Each other character's block** has 74 numbers. They are grouped by **reveal group**.
 A group's numbers are filled in only if the learner currently perceives that group of
 facts about the character ([Choosing what agents perceive](#choosing-what-agents-perceive));
 otherwise they are zeros.
@@ -369,7 +421,7 @@ otherwise they are zeros.
 | position | `dx`, `dy`, `line-of-sight` | the other character's position minus the learner's, in pixels divided by 2048; and 1 if no wall stands between them |
 | health | `health`, `alive` | as in the own block |
 | identity | `same-team`, `type:*` (2), `cat:*` (5), `npc`, `mega` | 1 if it is on the learner's team; its type and element; 1 if it is a monster; 1 if it is a Mega Monster (Monster Attack) |
-| status | `reflect`, `retal:dmg`, `retal:lock`, `locked`, `facing`, `spell:*` (32) | as in the own block |
+| status | `reflect`, `retal:dmg`, `retal:lock`, `locked`, `facing`, `carrying`, `spell:*` (32) | as in the own block; `carrying` 1 while it carries a flag |
 | decided at the cast's own position | `cast0:*`, `cast1:*` (8 each) | the character's moving casts ([Casts](#casts)) |
 
 A block for an empty slot is all zeros.
@@ -381,6 +433,11 @@ the top left. A walk flag is 1 where a character can walk; a sight flag is 1 whe
 character can see through. Cells beyond the edge of the map are 0. The fields are named
 `self:terrain:walk:dx,dy` and `self:terrain:sight:dx,dy`. The patch is the same in every
 observability mode.
+
+**The clock** is the observation's last number, `self:clock`. It is the share of the round left,
+1 at its start and 0 at its end (1 throughout a round with no time limit), which a player reads
+off the game information window. `"+noclock"` after a mode leaves it out
+(`"los+noclock"`, `"los+terrain:2+noclock"`), and `"clock": False` in a dictionary.
 
 ### Casts
 
@@ -419,7 +476,8 @@ dictionary ([Writing a mode out](#writing-a-mode-out)).
 
 **The terrain patch** is included in every mode with radius 3, unless you change it.
 `"los+terrain:5"` uses radius 5, and `"los+terrain:0"` leaves the patch out. The radius
-can be 0 to 16. In a dictionary, write `"terrain": r`.
+can be 0 to 16. In a dictionary, write `"terrain": r`. `"+noclock"` leaves out the clock
+(the observation's last number, above), and a mode's name includes it only when the clock is off.
 
 **Reveal groups and channels.** Each mode is made of one or more **channels**. A channel
 is a condition, such as a maximum range, a clear line of sight or a cone, plus the reveal
@@ -481,13 +539,14 @@ name, or a name already used by a different mode, is an error.
 
 `get_state()` returns the privileged state for a centralised critic. It holds everything
 about every character, whatever the observability mode, with absolute positions. Its
-length is **79 x C + 2**, which is 160 in a duel and 318 in a 2v2. For each character it holds `x`,
+length is **79 x C + 26**, which is 184 in a duel and 342 in a 2v2. For each character it holds `x`,
 `y`, `health`, `strength`, `intelligence`, its team number, its type (2 numbers),
 `alive`, `cooldown`, its element (5), `npc`, `mega`, `reflect`, `retal` (2), `visible`, `locked`,
 `knockback`, `facing`, the selected slot (9), the 32 spell flags, and two moving casts of
-seven numbers each (in use, x, y, vx, vy, row, tier). The last two numbers are the share
-of the episode that has passed (decisions / 1500) and the simulation's tick divided by
-100,000.
+seven numbers each (in use, x, y, vx, vy, row, tier). Then come the four flags of capture the flag, with six numbers each. They
+hold the flag's state (home, carried, dropped, away, one-hot) and where it is (x, y, in pixels
+divided by 2048), and are all zeros in other modes and for a team the map gives no flag. The last two numbers are the share of
+the episode's game time that has passed and the simulation's tick divided by 100,000.
 
 It is not the complete simulation state. It leaves out the random number stream on
 purpose, because a critic that could read it would learn to predict the random draws instead of
@@ -501,9 +560,9 @@ add it in your learner.
 
 | `reward` | each decision, a learner receives |
 | --- | --- |
-| `"dense"` (default) | +0.01 per point of damage dealt, -0.01 per point of damage taken, +5 per kill, -5 per death, and -0.01 |
+| `"dense"` (default) | +0.01 per point of damage dealt, -0.01 per point of damage taken, +5 per kill, -5 per death, and -0.01 per decision |
 | `"sparse"` | +1 per kill, -1 per death |
-| `"ladder"` | +0.25 per kill, -0.25 per death, +0.001 per point of damage dealt, -0.001 per point taken, -0.0002, and +0.0625 per monster killed. At the end of the episode, +1 to every learner on the winning side and -1 to the others. Meant to be used with a discount factor of 0.995 |
+| `"ladder"` | +0.25 per kill, -0.25 per death, +0.001 per point of damage dealt, -0.001 per point taken, -0.0002 per decision, and +0.0625 per monster killed. At the end of the episode, +1 to every learner on the winning side and -1 to the others. Meant to be used with a discount factor of 0.995 |
 | `"zero"` | 0, for measuring the environment rather than training a policy |
 | a dictionary of weights | the weighted sum of the terms below ([Weights](#weights)) |
 | a Python function | whatever the function returns ([A reward of your own](#a-reward-of-your-own)) |
@@ -528,9 +587,10 @@ changed during the decision. Use a negative weight for anything that should be a
 | `experience` | experience it gained |
 | `level_up` | levels it gained |
 | `ability_learned` | abilities it learned |
-| `score` | points its team scored, which are Domination points, or monsters killed in Monster Attack (always 0 in a duel and in `"tdm"`) |
+| `score` | points its team scored, which are Domination points, flags carried home in capture the flag, or monsters killed in Monster Attack (always 0 in a duel and in `"tdm"`, where `kill` pays) |
+| `capture` | the flags this agent itself carried home (capture the flag); its team's point is in `score` already |
 | `time` | 1 per decision, so the weight itself is added every decision; a negative weight makes a time penalty |
-| `win` | only at the decision that ends the episode, +weight for every learner on the winning side, -weight for the others. Nothing when the episode is truncated or drawn |
+| `win` | only at the decision that ends the episode, +weight for every learner on the winning side, -weight for the others -- at the score limit and at the time limit alike, and -weight for every learner when Monster Attack's team is overrun. Nothing when the episode is truncated or drawn |
 
 An unknown term is an error that lists the valid ones. A dictionary cannot be given on
 an EPyMARL command line ([section 8](#8-setting-up-and-running-epymarl)), so set weights in the yaml file, or in
@@ -576,14 +636,14 @@ per step. Use a name or a dictionary of weights there; those run in Java at no c
 
 ## 5. Maps
 
-`map_name` says where the map comes from, `map_seed` how often it changes, and
+`map_name` says where the map comes from, `map_seed` says how often it changes, and
 `map_schedule` switches maps as training progresses.
 
 ### Where a map comes from
 
 | `map_name` | the map |
 | --- | --- |
-| `"Ravenford"` (default), `"Greyhold"`, `"Frostmere"`, `"Northgate"`, `"Hearthcross"`, `"Longreach"`, `"Mazeholt"`, `"Kingshill"`, `"Riftholm"`, `"Tristwater"`, `"Lastlight"`, `"Cinderhold"`, `"Glimmerdeep"` or `"Green"` | a map that comes with the game |
+| `"Ravenford"` (default), `"Greyhold"`, `"Frostmere"`, `"Northgate"`, `"Hearthcross"`, `"Longreach"`, `"Mazeholt"`, `"Kingshill"`, `"Riftholm"`, `"Tristwater"`, `"Lastlight"`, `"Cinderhold"`, `"Glimmerdeep"`, `"Stilthaven"` or `"Green"` | a map that comes with the game |
 | a path such as `"/path/to/map.json"` | a map file in the saga-map format ([docs/maps/saga-map.md](maps/saga-map.md)) |
 | `"gen:<template>[:<key>=<value>...][@<seed>]"` | a map made by the generator, for example `"gen:forest:trees=120@7"`. Without `@<seed>`, the seed is 1 |
 
@@ -591,7 +651,7 @@ The maps that come with the game:
 
 | map | size in cells | style | what it contains |
 | --- | --- | --- | --- |
-| Ravenford | 63 x 47 | a river and its crossings | a river splits the map; a bridge and two fords are the three captures; a village with shops on each bank |
+| Ravenford | 63 x 47 | a river and its crossings | a river splits the map; a bridge and two fords are the three captures; a village with a shop on each bank |
 | Greyhold | 63 x 47 | fortress ruins | walls with gates round a courtyard with fallen-in floor and an inner keep; three captures on the middle line; the camps outside |
 | Frostmere | 63 x 47 | frozen islands | home islands joined by snow causeways to two outer islands; the central island and its capture are reached only by teleport pads |
 | Northgate | 64 x 56 | walled town | a dense grid of houses and cobbled roads, four captures |
@@ -604,6 +664,7 @@ The maps that come with the game:
 | Lastlight | 95 x 72 | a hamlet in a dark wood | made for Monster Attack, a fenced hamlet with four gates, twelve monster homes in clearings at the forest's edge |
 | Cinderhold | 63 x 47 | a volcanic waste | a lava moat round an island crossed by four bridges, a raised rock at its heart holding the main capture; each side camps on a raised rock climbed by two ladders |
 | Glimmerdeep | 71 x 51 | a cavern underground | a rift down the middle that blocks walking and not sight, crossed only on three bridges, the middle one by an island with the main capture; an ice ledge on each side to watch the bridges from; boulders the only cover from sight |
+| Stilthaven | 71 x 51 | a lake crossed on boardwalks | two fishing villages face each other across a lake crossed only by footbridges: three long lanes joined by crosswalks and a cross in the middle with the main capture, a capture on the north and south lanes; short docks to islets with slimes. The water blocks walking and not sight, so casters fire from lane to lane |
 | Green | 61 x 51 | plain grass | two spawn points and nothing else, for tests |
 
 A cell is 16 x 16 px, and every map but Green has shops. If you ask for more monsters than the map
@@ -620,21 +681,21 @@ of a symmetric map; "per 1000" counts per 1000 cells of the map:
 
 | template | its own settings |
 | --- | --- |
-| `arena` | `gap` (12): cells between the two sides' spawn points, 4 to 400; `cover` (6): wall pieces per 1000; `rocks` (8): per 1000 |
-| `field` | `fields` (2): fenced fields per half; `trees` (15): per 1000; `animals` (2) |
-| `forest` | `trees` (90) and `oaks` (12): small and large trees per 1000; `woods` (`any`): `green`, `autumn`, `pine`, or `any` for one drawn per map; `paths` (2): path width, 1 to 4; `cliffs` (2): raised ground, small to large, a large one now and then with a smaller one on its top; each map gets between none and this many per half, 0 to 6 |
-| `village` | `houses` (5): per half; `trees` (12): per 1000; `fields` (2) and `ponds` (2): each map gets between none and this many per half; `animals` (2); `villagers` (3) |
-| `lakes` | `water` (180): cells under water per 1000; `trees` (20): per 1000 |
-| `lava` | `lava` (120): cells in lava pools per 1000; `rivers` (1): rivers of lava down each half, crossed by bridges, each map gets between none and this many, 0 to 2; `cliffs` (3): as the forest's; `rocks` (10) and `embers` (20): per 1000. Mirrored by default |
+| `arena` | `gap` (12): the fewest cells between two sides' spawn points, 4 to 400; `cover` (6): wall pieces per 1000; `rocks` (8): per 1000 |
+| `field` | `fields` (2): fenced fields per half; `trees` (15): per 1000; `hedges` (6): hedgerows with gaps that part the map into paddocks, 0 to 12; `orchards` (2): blocks of oaks, in rows or loose, from one up to this many per side; `streams` (1): bridged streams between a side and the middle, 0 none, 1 on one map in two, 2 on every map; `ditches` (2) and `fences` (3): water a cell wide in hedge lines, and fences along straight stretches of road, each map gets between none and this many; `animals` (2) |
+| `forest` | `trees` (90) and `oaks` (12): small and large trees per 1000; `woods` (`any`): `green`, `autumn`, `pine`, or `any` for one drawn per map; `paths` (2): path width, 1 to 4; `cliffs` (2): raised ground, small to large, a large one now and then with a smaller one on its top; each map gets between none and this many per half, 0 to 6; `cottages` (1): cottages standing alone among the trees, each map gets between none and this many per side, 0 to 4 |
+| `village` | `houses` (5): per half; `trees` (12): per 1000; `fields` (2) and `ponds` (2): each map gets between none and this many per half; `rivers` (1): a river through the village or beside it in place of the ponds, on no map (0), one map in three (1) or every map (2); `animals` (2); `villagers` (3) |
+| `lava` | `lava` (120): cells in lava pools per 1000; `rivers` (1): rivers of lava down each half, crossed by bridges, each map gets between none and this many, 0 to 2; `cliffs` (3): as the forest's; `rocks` (10) and `embers` (20): per 1000. A bridge crosses lava from shore to shore. Mirrored by default |
+| `ice` | `chasm` (100): cells in black chasms per 1000, which block walking and not sight; `rifts` (1): winding chasms down each half, crossed by bridges, each map gets between none and this many, 0 to 2; `cliffs` (3): raised ice, from one up to this many per half; `crystals` (24) and `rocks` (4): per 1000. Mirrored by default |
 
 Settings every template takes:
 
 | setting | default | allowed values |
 | --- | --- | --- |
 | `size` | `61x51` | width x height in cells, from 20x20 to 512x512 for training. The game client only plays maps from 50x40 to 128x128 |
-| `symmetry` | `mirror` for an arena or lava, `rot2` for the others | `none`, `mirror`, `rot2` (turned 180 degrees) or `rot4` (turned 90 degrees, which needs a square map and 4 teams) |
+| `symmetry` | `mirror` for an arena, lava or ice, `rot2` for the others | `none`, `mirror`, `rot2` (turned 180 degrees) or `rot4` (turned 90 degrees, which needs a square map and 4 teams) |
 | `teams` | 2 | 2 to 4 |
-| `spawns` | 1 | spawn points per team, 1 to 4 |
+| `spawns` | 0 | spawn points per team, 1 to 4; 0 lets the map's size decide: 1 up to 2,500 cells, up to 2 up to 5,500, up to 3 above |
 | `captures` | 1 | capture points, 0 to 8 |
 | `shops` | 1 | shops per team, 0 to 2 |
 | `teleports` | 0 | pairs of teleports per half, 0 to 4 |
@@ -643,8 +704,9 @@ Settings every template takes:
 | `name` | none | the map's name |
 
 `animals` and `villagers` are decoration only. The game client draws them, but they do
-not exist in the simulation, so agents never see or meet them. A symmetric map is fair
-by construction, as each team is as far from every capture point, and from its own shops,
+not exist in the simulation, so agents never see or meet them. Spawn points stand where
+the seed puts them, each side's at least half the map's width from every other side's. A
+symmetric map is fair by construction, as each team is as far from every capture point, and from its own shops,
 as every other team.
 
 ### How often the map changes
@@ -695,6 +757,8 @@ alongside fixed team mates. The learners are the characters in the remaining slo
 | `kite:<min>:<max>` | the same, keeping the enemy between *min* and *max* pixels away |
 | `capture` | stands on the map's first capture point |
 | `defend` | stands on the map's first capture point, and attacks only enemies that come within 70 px of it |
+| `guard:<slot>` | stays near the character in *slot*, walking round bounce and teleport tiles, and fights enemies that come within 80 px of that character. While that character is dead, it guards that character's spawn point |
+| `flag` | capture the flag: carries a flag home when it has one, returns its own team's dropped flag, else goes for the nearest flag it can take |
 | `neural:<file>` | a trained policy exported by `pysaga.export`, always taking its best action |
 | `sample:<file>` | the same policy, drawing its action at random from its action probabilities, as during training. Use this to reproduce the win rates of a training log |
 
@@ -736,12 +800,15 @@ walking home, and it does not regain health at home. Monsters
 occupy the slots after the agents' slots, so each monster adds a block to the observation
 (with its `npc` flag set to 1) and a target to the action space.
 
-| monster | health | bite damage | notices characters within | leash | respawns after | its killer gets |
+| monster (its kind in a map file) | health | bite damage | notices characters within | leash | respawns after | its killer gets |
 | --- | --- | --- | --- | --- | --- | --- |
 | slime | 30 | 5, every 1 s | 80 px | 160 px | 20 s | 5 experience, 5 coins |
 | skeleton | 60 | 8, every 0.6 s | 128 px | 192 px | 25 s | 10 experience, 8 coins |
 | pig | 100 | 12, every 0.5 s | 112 px | 160 px | 30 s | 15 experience, 12 coins |
 | golem | 150 | 15, every 0.9 s | 96 px | 128 px | 40 s | 25 experience, 20 coins |
+| blue-slime | 45 | 7, every 0.9 s | 80 px | 160 px | 20 s | 8 experience, 8 coins |
+| red-slime | 60 | 9, every 0.8 s | 80 px | 160 px | 20 s | 11 experience, 10 coins |
+| bull | 120 | 14, every 0.6 s | 112 px | 160 px | 30 s | 18 experience, 15 coins |
 
 You choose how many monsters, not which kinds. Each home in a map file names the kind of
 monster that stands there, and homes are filled in the order the map lists them, so
@@ -787,10 +854,12 @@ adds them up over a batch and logs their means:
 - `kills`, `deaths` and `damage`: the learners' totals;
 - `decisions`: the episode's length;
 - `win_team<n>`: 1 if team *n* won, else 0, for each team in the episode;
-- `draw`: 1 if the episode was a draw.
+- `draw`: 1 if the episode was a draw;
+- `lost`: 1 if Monster Attack's team was overrun.
 
 So `test_win_team1_mean` in EPyMARL's log is team 1's win rate. `get_stats()` also gives
-`winner` (the winning team's number; 0 if the episode was truncated, -1 for a draw) and
+`winner` (the winning team's number; 0 if the episode was truncated, -1 for a draw, -2 when
+Monster Attack's team was overrun) and
 one entry per learner in `kills_per_agent`, `deaths_per_agent`, `damage_per_agent`,
 `team_per_agent` and `type_per_agent` (0 for a warrior, 1 for a magician).
 
@@ -800,6 +869,17 @@ one entry per learner in `kills_per_agent`, `deaths_per_agent`, `damage_per_agen
 `env.load_state()` restores it exactly, as often as you like, which supports planning
 and search. `env.state_hash()` returns a hash of the current state. Two states with the
 same hash are identical.
+
+### Normalised inputs
+
+`normalise=<file>` makes the environment return each observation standardised, x' =
+clip((x - mean) / std, -10, 10), with fixed statistics from a file that `pysaga.normalise` fitted on
+data. The state is normalised too where the file holds state statistics. Positions are
+divided by 2048, so a melee reach of 17 px is 0.008 of an input, and a network learns far
+faster from standardised inputs. The statistics never change during a run, so the
+environment stays Markov. A policy file exported from such a run carries them and the game
+applies them, while bots and `describe_obs()` still read raw values. See
+[Normalised inputs](imitation.md#4-normalised-inputs) for fitting a file.
 
 ### Where the game's data is
 
@@ -837,9 +917,15 @@ fills its batches exactly as single environments would.
 - **`common_reward` and `reward_scalarisation`** are EPyMARL's own options, set outside
   `env_args`. EPyMARL passes them on to the environment.
 - **The yaml file's training defaults** are 2,050,000 steps (`t_max`), an evaluation of
-  32 greedy episodes every 50,000 steps (`test_nepisode`, `test_interval`,
-  `test_greedy`), and a log line every 50,000 steps. With `reward=ladder`, set
-  `gamma=0.995`.
+  32 episodes every 50,000 steps (`test_nepisode`, `test_interval`), and a log line every
+  50,000 steps. With `reward=ladder`, set `gamma=0.995`.
+- **Evaluation is sampled play for IPPO and MAPPO.** Their action selector ignores
+  `test_greedy`, so the test curves draw actions from the policy's probabilities. Measure
+  a final policy greedily with `neural:` ([section 9](#9-exporting-evaluating-watching-and-playing-against-a-trained-policy)).
+- **`learner=saga_ppo_learner`** is EPyMARL's PPO learner with separate `actor_lr` and
+  `critic_lr`, and `actor_hold_steps` to hold the actor still at first, for a run started
+  from a behaviour clone ([Start IPPO from a clone](imitation.md#5-start-ippo-from-a-clone)).
+  With its defaults it is the stock learner.
 
 ## 9. Exporting, evaluating, watching and playing against a trained policy
 
@@ -871,10 +957,9 @@ writes a page to open in a browser. It shows the map and every character's posit
 health and actions, decision by decision. Each episode is replayed first, and checked
 against its recorded hash.
 
-The page draws each map plain: every cell coloured by the two terrain flags an agent
-observes, walked and seen through, seen through but not walked (water, a pit, a chasm, a
-cliff, a fence), or neither (a wall, a house). The points are marked: spawns in their
-team's colour, capture points, shops, bounces, teleports with a dotted line to where they
+The page draws each map plainly. Every cell is coloured by the two terrain flags an agent
+observes, as walked and seen through, seen through but not walked (water, a pit, a chasm, a
+cliff, a fence), or neither (a wall, a house). The points are marked, with spawns in their team's colour, and capture points, shops, bounces, teleports with a dotted line to where they
 land, and monster homes. The package carries none of the game's pictures, so the page
 shows no tiles. The same file plays in the real game, drawn as the game draws it, with
 its graphics and sound:
@@ -883,7 +968,7 @@ its graphics and sound:
 java -jar saga-client.jar -replay saga_replay.json
 ```
 
-This works for an episode on any map: one that comes with the game, a map file of your
+This works for an episode on any map, whether one that comes with the game, a map file of your
 own (the replay file carries its text) or a generated map (rebuilt from its spec and
 seed). It needs the game client of the same version as the pysaga that recorded the file.
 `java -jar saga-client.jar -replay saga_replay.json 3` plays episode 3. During the
@@ -928,7 +1013,8 @@ was trained:
   instead.
 - The bot observes as many other characters as it trained with, the first ones in the
   round in slot order.
-- Its recurrent memory is cleared every time it respawns.
+- Its recurrent memory is cleared at the start of each round, and runs on through its
+  deaths, as in a training episode.
 - In a real round, the state it decides on is two or three ticks older than the tick its
   action takes effect on. In training there was no such delay.
 

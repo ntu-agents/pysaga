@@ -1,8 +1,23 @@
-<p align="center"><img src="docs/logo.png" alt="Saga Online" width="278"></p>
+<p align="center"><img src="docs/logo.png" alt="pySaga" width="327"></p>
 
-A 2D top-down multiplayer action-RPG developed in Java, rebuilt as a research environment for multi-agent
-reinforcement learning (MARL). Warriors and magicians fight with weapons and abilities
-across generated maps, in Deathmatch, Team Deathmatch, Domination and Monster Attack game modes. Play the game by joining existing game servers or starting your own game server. Train player policies using MARL algorithms in [EPyMARL](https://github.com/uoe-agents/epymarl), then play against your RL-trained policies.
+pySaga is a Python interface and toolset for [EPyMARL](https://github.com/uoe-agents/epymarl) that lets you train multi-agent reinforcement learning (MARL)
+policies for [Saga Online](https://github.com/svalbrecht/saga-online-client), a 2D top-down
+multiplayer action-RPG.
+In the game, warriors and magicians fight with weapons and abilities on generated maps, in five game modes: Deathmatch, Team Deathmatch, Domination,
+Monster Attack and Capture the Flag. The simulation is deterministic and runs inside your
+Python process, with no server, and a saved state restores exactly.
+
+The package provides:
+
+- environments with a Gym-style interface, and a vectorised one that steps many worlds in
+  one call, with a choice of observability (full, line of sight, a cone of view and others),
+  rewards, maps and opponents (the game's scripted bots or trained policies);
+- EPyMARL's algorithms, IPPO and MAPPO among them, set up to train on these environments;
+- tools to export a trained policy, evaluate it against the game's bots, and watch its
+  episodes as replays in a browser or in the game;
+- learning from an expert, with behaviour cloning, DAgger and offline RL.
+
+A trained policy also plays in the game itself as a bot, so you can play against it.
 
 ## Play
 
@@ -58,6 +73,7 @@ watch in a browser or in the game itself, are all in [docs/rl-quickstart.md](doc
 | --- | --- |
 | [docs/rl-quickstart.md](docs/rl-quickstart.md) | a tutorial: install, train an agent with EPyMARL, measure it, watch it, play against it |
 | [docs/rl-reference.md](docs/rl-reference.md) | the RL package in full, with the environment, every option and the tools |
+| [docs/imitation.md](docs/imitation.md) | learning from an expert: behaviour cloning, DAgger, offline RL, IPPO started from a clone |
 | [docs/abilities.md](docs/abilities.md) | every ability and weapon, with its numbers |
 | [docs/maps/](docs/maps/) | the map format, its schema, and a prompt for writing maps with a language model |
 | [docs/ADMIN_COMMANDS.md](docs/ADMIN_COMMANDS.md) | the commands of a game server's administrators |
@@ -66,22 +82,18 @@ watch in a browser or in the game itself, are all in [docs/rl-quickstart.md](doc
 | [configs/](configs/) | contributed training configurations and scripts that reproduce a result |
 | [policies/](policies/) | contributed trained policy files |
 | `PUBLISHED.txt` | the build this repository's published files come from |
-| [LICENSE](LICENSE), [LICENSE-SIMULATION.md](LICENSE-SIMULATION.md), [NOTICE](NOTICE) | the licences: see below |
+| [LICENSE](LICENSE), [LICENSE-SIMULATION.md](LICENSE-SIMULATION.md), [NOTICE](NOTICE) | the licences of the Python code, the bundled simulation and the contributions |
 
 Contributions of maps, configurations and trained policies are welcome as pull requests
 into `maps/`, `configs/` and `policies/`. Everything else here, this README, `docs/` and
 `pysaga/` among it, is copied from the game's own repository at each release. To suggest
 a change to one of those files, open an issue rather than a pull request.
 
-## Licence
+## Reporting problems
 
-- **pysaga's Python code and the documentation:** [Apache License 2.0](LICENSE).
-- **The simulation and game data the package bundles** (`pysaga/_data`): free for
-  non-commercial use, as part of pysaga only, under [LICENSE-SIMULATION.md](LICENSE-SIMULATION.md).
-- **Contributed maps, configurations and policies:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/),
-  unless a contribution says otherwise.
-- **The game** (`saga-client.jar`) is not open source: see the downloads repository's
-  [NOTICE](https://github.com/svalbrecht/saga-online-client/blob/main/NOTICE.md).
-
-Copyright 2026 NTU Autonomous Agents Research Group; the simulation and the game,
-Copyright 2008-2026 Stefano V. Albrecht. See [NOTICE](NOTICE).
+- **The RL package** (installing it, the environment, EPyMARL, export, replays, these
+  docs): this repository's [Issues](https://github.com/ntu-agents/pysaga/issues). Give
+  pysaga's version (`pip show pysaga`) and, if you can, a seed or a replay file that shows it.
+- **The game** (the client, servers, playing): the downloads repository's
+  [Issues](https://github.com/svalbrecht/saga-online-client/issues), and a report sent from
+  the game, as its [playing guide](https://github.com/svalbrecht/saga-online-client/blob/main/docs/playing.md#reporting-a-problem) explains.

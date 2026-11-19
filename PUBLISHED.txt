@@ -4,7 +4,8 @@ Edit these files there; the next publish rewrites them.
 build: 5f7c346-20261103115443
 version: 0.1.795
 demo state hash: -8876696378546793987
-date: 2026-11-03 11:57
+docs: 5e1778a
+date: 2026-11-19 09:36
 
 published paths:
   .github/workflows/wheel.yml
@@ -16,6 +17,7 @@ published paths:
   README.md
   docs/ADMIN_COMMANDS.md
   docs/abilities.md
+  docs/imitation.md
   docs/logo.png
   docs/maps/llm-prompt.md
   docs/maps/saga-map.md

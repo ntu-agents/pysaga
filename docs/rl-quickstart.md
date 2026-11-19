@@ -62,11 +62,13 @@ What it shows:
 - **The default game is a duel** on the map Ravenford, a warrior (agent 0) against a
   magician (agent 1). `scripted={1: "melee"}` gives the magician to one of the game's
   own bots, so you control the warrior alone and `n_agents` is 1.
-- **Each decision**, an agent gets an observation of 257 numbers (itself, the other
+- **Each decision**, an agent gets an observation of 293 numbers (itself, the other
   characters, the ground around it) and picks one of 109 actions (move, stop, select an
   ability, use it, learn, buy, use an item). `get_avail_actions` says which are allowed
   now.
-- **An episode** ends when a side has three kills, or after 1500 decisions.
+- **An episode** is a round of 300 seconds of game time, 1500 decisions. It ends sooner
+  when a side's score reaches 3; a kill scores the level of the character killed, 1 at
+  the start. At the end the side with the most score wins.
 - **The abilities are dealt.** In training each character starts with five abilities
   of its type's fire element in hotbar slots 0 to 4, and learns nothing more. The
   warrior has Explosion 1, 2 and 3 (blasts round itself) and Fire Run 1 and 2 (a run in
@@ -119,11 +121,11 @@ python src/main.py --config=ippo --env-config=saga with \
 
 Every few seconds the log prints the latest evaluation. `test_win_team1_mean` is your
 warrior's win rate, `test_return_mean` its return. On our test laptop the run took
-about 70 seconds, and the win rate went:
+about 75 seconds, and the win rate went:
 
-| steps | 90,000 | 290,000 | 467,000 | 634,000 |
+| steps | 72,000 | 181,000 | 298,000 | 415,000 |
 | --- | --- | --- | --- | --- |
-| win rate | 22% | 75% | 100% | 100% |
+| win rate | 66% | 87% | 92% | 100% |
 
 Everything a run writes is under `results/`, its settings and figures in
 `results/sacred/` and its networks in `results/models/<run>/<step>/`. Add
@@ -156,7 +158,8 @@ prints the win rates. `sample:` draws each action as training did; `neural:` tak
 best one. Ours won all 200 episodes against `kite`, and all 200 against `melee`, a bot
 it never met in training.
 
-The bots are `melee`, `hold` (stands still), `chase`, `flee`, `kite`, `capture`, `defend`.
+The bots are `melee`, `hold` (stands still), `chase`, `flee`, `kite`, `capture`, `defend`
+and `flag`.
 A trained policy is a bot too, so `--p2 sample:other.policy` plays two policies against
 each other.
 
@@ -175,10 +178,9 @@ python -m pysaga.replay saga_replay.json -o replays.html
 
 The evaluation writes `saga_replay.json`, with each episode's seed and actions, which
 replay it exactly. `python -m pysaga.replay` checks every episode against the end state
-recorded, and writes `replays.html`. Open it in a browser to step through each episode:
-the map, the characters, their health and their actions. The map is drawn plain: every
-cell coloured by whether it can be walked and seen through, which is what an agent
-perceives of the terrain. The package carries none of the game's pictures.
+recorded, and writes `replays.html`. Open it in a browser to step through each episode, with the map, the characters, their health
+and their actions. The map is drawn plainly, with every cell coloured by whether it can be
+walked on and seen through, which is what an agent perceives of the terrain. The package carries none of the game's pictures.
 
 The same file plays in the game itself, drawn as the game draws it, with the sprites and
 sounds:
@@ -189,9 +191,8 @@ java -jar saga-client.jar -replay saga_replay.json 0
 
 with `saga-client.jar` of the same version, from the game's
 [downloads repository](https://github.com/svalbrecht/saga-online-client/releases) (give its path if it is in another
-folder); `0` is the episode, on whatever map it played. Space pauses, and the replay
-box's arrows step, change the episode (among those played on the same map) and change the
-player the view follows.
+folder); `0` is the episode, on whatever map it played. Space pauses, and the replay box's arrows step through decisions, change the episode
+(among those played on the same map) and change which player the view follows.
 
 ## 8. Play against a policy in the game
 
@@ -259,9 +260,10 @@ On the server the bot counts as yours. An admin's `/kick <your name>#1` removes 
 and banning the bot bans your account. A bot never runs an admin command, even when you
 are an admin, and sends no automatic problem reports.
 
-Three things differ from training. A policy trained in a duel sees one other character:
-in a round of four it sees and aims at the first other player only. Its memory starts
-afresh each time it respawns, since a training episode ended at a kill. And it decides
+Three things differ from training. A policy trained in a duel sees one other character, so in a round of four it sees and
+aims at the first other player only. Its memory starts
+afresh at each round, as at the start of a training episode, and runs on through its
+deaths, as an episode does. And it decides
 on what the game looked like two or three ticks (about a tenth of a second) before its
 action takes effect, the time an action takes to reach every player's game, where in
 training an action took effect at once.
@@ -284,5 +286,7 @@ Change one setting at a time on the training command line, and measure again:
   is in its line of sight.
 - **Another reward**: `env_args.reward=ladder`, which pays a win at the end, meant for
   `gamma=0.995`.
+- **Learning from an expert**: clone a bot or a trained policy, measure how closely the
+  clone plays, and start IPPO from it. See [Imitation and offline learning](imitation.md).
 
 The [reference](rl-reference.md) lists every option and what each does.
