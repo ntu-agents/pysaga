@@ -54,8 +54,12 @@ def _env(opponent, observability="los", reward="ladder", map_name=None, root=Non
 def native(policy, opponent, episodes, out, seed=1, observability="los", reward="ladder", name="native", frame_skip=4):
     """The same bot played headlessly in the learner's slot: the native dataset, in the same layout."""
     env, obs = _env(opponent, observability, reward, frame_skip=frame_skip)
+    import jpype
     from saga.sim.rl import PolicyDataset
+    from .dataset import lag_arrays, layout_of
     d = PolicyDataset.collect(env, policy, obs, int(episodes), int(seed))
+    dynamics = int(jpype.JClass("saga.sim.World").DYNAMICS)
+    fields = [str(f) for f in env.obsFieldNames(0)]
     trajectories = []
     for tr in d.trajectories:
         n = int(tr.length)
@@ -66,27 +70,36 @@ def native(policy, opponent, episodes, out, seed=1, observability="los", reward=
             masks=np.asarray(tr.masks, dtype=np.int8).reshape(n, int(d.totalActions)),
             rewards=np.asarray(tr.rewards, dtype=np.float32),
             ticks=np.asarray(tr.ticks, dtype=np.int64),
+            dynamics=np.full(n, dynamics, dtype=np.int32),
+            **lag_arrays(tr),                       # a headless episode has no lag: -1 and 0 throughout
             terminated=bool(tr.terminated), truncated=bool(tr.truncated)))
     made = dict(observability=observability, agents=int(d.agents), progression=False, reward=reward,
                 frame_skip=int(d.frameSkip), obs_size=int(d.obsSize), n_actions=int(d.totalActions),
+                layout=layout_of(fields, int(d.totalActions), int(d.agents)), fields=fields, dynamics=dynamics,
+                schema=int(jpype.JClass("saga.sim.GameState").SCHEMA),
                 native=dict(policy=policy, opponent=opponent, episodes=int(episodes), seed=int(seed)))
     counts = {str(k): int(d.counts.get(k)) for k in d.counts.keySet()}
     return write_round(trajectories, counts, made, out, name, Pseudonyms(None))
 
 
-def load(dirs, type_=None):
+def load(dirs, type_=None, dynamics=None):
     """Transitions from datasets' npz files: (s, a, r, s', done, mask, mask'), the episodes of one character type.
 
     Datasets of one decision rate only: a transition is a decision, and two rates are two
-    different problems. The rate comes back as data["frame_skip"], which training passes on
-    to the policy file and evaluation to the environment."""
-    obs, act, rew, nxt, done, mask, nmask = [], [], [], [], [], [], []
-    rates = {}
+    different problems, and of one observation layout (each dataset's JSON says it; datasets
+    of two are aligned first, python -m pysaga.dataset align). The rate comes back as
+    data["frame_skip"], which training passes on to the policy file and evaluation to the
+    environment. Each transition's dynamics (the
+    World.DYNAMICS its round was played under) comes back as data["dynamics"], for a model
+    that conditions on it; dynamics, a set, keeps only the episodes played under those."""
+    obs, act, rew, nxt, done, mask, nmask, dyn = [], [], [], [], [], [], [], []
+    rates, layouts = {}, {}
     for d in dirs:
         for f in sorted(glob.glob(os.path.join(d, "*.npz"))):
             z = np.load(f)
             meta = json.load(open(f[:-4] + ".json"))
             rates.setdefault(int(meta.get("frame_skip", 4)), []).append(f)
+            layouts.setdefault(meta.get("layout", "unnamed"), []).append(f)
             ep = z["episode"]
             for k, e in enumerate(meta["episodes"]):
                 if type_ is not None and e.get("type") != type_:
@@ -94,6 +107,10 @@ def load(dirs, type_=None):
                 rows = np.nonzero(ep == k)[0]
                 if len(rows) < 2:
                     continue
+                played = int(z["dynamics"][rows[0]])
+                if dynamics is not None and played not in dynamics:
+                    continue
+                dyn.append(np.full(len(rows) - 1, played, dtype=np.int32))
                 o, a, r, m = z["observations"][rows], z["actions"][rows], z["rewards"][rows], z["masks"][rows]
                 end = bool(e.get("terminated"))
                 obs.append(o[:-1]); act.append(a[:-1]); rew.append(r[:-1]); mask.append(m[:-1])
@@ -105,11 +122,14 @@ def load(dirs, type_=None):
     if len(rates) > 1:
         raise SystemExit("datasets of different decision rates (frame_skip %s) cannot be trained on together: %s"
                          % (sorted(rates), {k: v[:2] for k, v in rates.items()}))
+    if len(layouts) > 1:
+        raise SystemExit("datasets of different observation layouts cannot be trained on together until aligned "
+                         "(python -m pysaga.dataset align): %s" % {k: v[:2] for k, v in layouts.items()})
     if not obs:
         raise SystemExit("no episodes in %s" % (dirs,))
     cat = np.concatenate
     return dict(obs=cat(obs), act=cat(act), rew=cat(rew), nxt=cat(nxt), done=cat(done),
-                mask=cat(mask).astype(np.float32), nmask=cat(nmask).astype(np.float32),
+                mask=cat(mask).astype(np.float32), nmask=cat(nmask).astype(np.float32), dynamics=cat(dyn),
                 frame_skip=next(iter(rates)))
 
 

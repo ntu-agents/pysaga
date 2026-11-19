@@ -28,7 +28,7 @@ import numpy as np
 
 from . import bridge
 from .env import (DEFAULT_MAP, MODES, REPLAY_VERSION, _episode_info, _map_entry, _map_texts, _observability, _reward,
-                  _scenario, _scripted_specs, _stats)
+                  _round_record, _scenario, _scripted_specs, _stats)
 
 
 class VecSagaEnv(object):
@@ -37,7 +37,8 @@ class VecSagaEnv(object):
                  common_reward=False, reward_scalarisation="sum",
                  observability="full", progression=False, reward="dense",
                  mode="duel", team_size=2, parallel=True, auto_reset=False,
-                 scripted=None, kit="dealt", map_seed="fixed", map_schedule=None, monsters=0, frame_skip=4, normalise=None, **kwargs):
+                 scripted=None, kit="dealt", map_seed="fixed", map_schedule=None, monsters=0, frame_skip=4, normalise=None,
+                 time_limit=300, score_limit=None, cutoff=None, lives=5, **kwargs):
         """The options of SagaEnv, read by the same code, plus:
 
         n_envs      how many worlds
@@ -64,7 +65,8 @@ class VecSagaEnv(object):
                 % (", ".join(sorted(repr(k) for k in kwargs)),
                    "n_envs, map_name, seed, root, common_reward, "
                    "reward_scalarisation, observability, progression, reward, "
-                   "mode, team_size, parallel, auto_reset, scripted, kit, map_seed, map_schedule, monsters, frame_skip, normalise"))
+                   "mode, team_size, parallel, auto_reset, scripted, kit, map_seed, map_schedule, monsters, frame_skip, normalise, "
+                   "time_limit, score_limit, cutoff, lives"))
         if callable(reward):
             raise TypeError(
                 "a Python reward runs per world per step; the vectorised "
@@ -91,7 +93,9 @@ class VecSagaEnv(object):
         from .normalise import for_environment
         self.normalise = None if normalise is None else str(normalise)
         self._norm = None if normalise is None else for_environment(normalise)
-        scenario = _scenario(Scenario, mode, map_name, team_size, progression, kit, monsters, frame_skip)
+        scenario = _scenario(Scenario, mode, map_name, team_size, progression, kit, monsters, frame_skip,
+                             time_limit, score_limit, cutoff, lives)
+        self.round = _round_record(scenario)
         self.frame_skip = int(scenario.frameSkip)
         obs_spec = _observability(Observability, observability)
         # The spec as given where it is a string, which Observability.parse reads back -- a
@@ -297,7 +301,7 @@ class VecSagaEnv(object):
         # The bots and the map are per EPISODE: a batch may hold a different one in every world.
         env = {"map_name": self.map_name, "map_seed": self.map_seed, "mode": self.mode, "team_size": self.team_size,
                "kit": self.kit, "progression": self.progression, "monsters": self.monsters,
-               "frame_skip": self.frame_skip,
+               "frame_skip": self.frame_skip, **self.round,
                "observability": self.observability,
                "reward": self.reward_name, "learner": getattr(self, "learner_name", None),
                "normalise": self.normalise}

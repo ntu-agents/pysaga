@@ -79,6 +79,19 @@ env_args:
   # the balance tables are fitted to 4; a trained policy in a scripted slot decides at its
   # own rate, and a run whose rates differ says so once. A discount (gamma) is the learner's: at 2, 0.995 looks half as far in time.
   frame_skip: 4
+  # The episode's end, yours to say. time_limit: seconds of game time the round runs; at
+  # its end the mode names the winner (most score -- the levels of the players a side
+  # killed -- then kills, then fewer deaths; domination's points; Monster Attack survived)
+  # and the episode is TERMINATED, so a ladder reward's win is paid there too. score_limit:
+  # an earlier end at that score; null is the mode's own (duel 3, tdm 10, dom 30, ma 30),
+  # 0 none. cutoff: seconds after which an episode is TRUNCATED with no winner (null:
+  # none); EPyMARL's info["episode_limit"] says so. lives: Monster Attack's deaths per
+  # player before the team is overrun and loses. A length frame_skip does not divide (in
+  # ticks of 50 ms) is refused.
+  time_limit: 300
+  score_limit: null
+  cutoff: null
+  lives: 5
   # The inputs standardised for learning (pysaga.normalise): a file of fixed statistics,
   # fitted once from data, which the environment applies to the observations and the
   # state it returns -- actor and critic alike. null is the raw observation. pysaga.export

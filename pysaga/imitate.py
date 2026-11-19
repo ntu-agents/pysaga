@@ -17,7 +17,15 @@ What "matches" means is the plan's, and is measured here:
   equivalent  each share within 5 points, each per-episode mean's 95% Welch interval of
               the difference inside +-max(10% of the expert's mean, a floor).
 
-    python -m pysaga.imitate <rung> --out <dir>      the rungs of the plan, see main()
+A library, used from Python: docs/imitation.md (public/docs here) walks through it. One
+command besides, for a policy's play under lag:
+
+    python -m pysaga.imitate lag-sweep <policy> [--opponent kite] [--shadow melee]
+        [--delays 0,1,2,3,5] [--recorded rounds/*.npz] [--episodes 200]
+
+plays the policy with its actions landing each delay late, and with delays drawn per
+action from recorded play (the seen_distance of datasets pysaga.dataset wrote), and prints
+the outcomes and the agreement with the shadow, a row a delay.
 """
 
 import argparse
@@ -51,15 +59,23 @@ def make_env(map_name=None, observability="full", root=None):
 
 
 def run(env, actor, opponent, episodes, seed, pace=4, opp_pace=4, delay=0, epsilon=0.0,
-        shadow=None, actor_lag=0, shadow_lag=0, record=False, opp_delay=0):
-    """Episodes of `actor` against `opponent` in the harness: outcomes, agreement, and the decisions if recorded."""
+        shadow=None, actor_lag=0, shadow_lag=0, record=False, opp_delay=0, delays=None, opp_delays=None):
+    """Episodes of `actor` against `opponent` in the harness: outcomes, agreement, and the decisions if recorded.
+
+    `delays` and `opp_delays`, where given, are lists of delays in ticks: each action's delay
+    is drawn from its player's list (every entry equally likely) in place of the fixed one.
+    """
+    import jpype
     from saga.sim.rl import Imitation
+    ints = lambda xs: None if xs is None else jpype.JArray(jpype.JInt)([int(x) for x in xs])
     r = Imitation.play(env, actor, int(actor_lag), shadow, int(shadow_lag), opponent, int(pace), int(opp_pace),
-                       int(delay), int(opp_delay), float(epsilon), int(episodes), int(seed), bool(record))
+                       int(delay), int(opp_delay), ints(delays), ints(opp_delays), float(epsilon), int(episodes),
+                       int(seed), bool(record))
     out = dict(kills=np.asarray(r.kills, float), deaths=np.asarray(r.deaths, float),
                dealt=np.asarray(r.dealt, float), taken=np.asarray(r.taken, float),
                ticks=np.asarray(r.ticks, float), outcome=np.asarray(r.outcome, int),
-               decisions=int(r.decisions), agreed=int(r.agreed))
+               decisions=int(r.decisions), agreed=int(r.agreed),
+               landed_after=np.asarray(r.landedAfter, dtype=np.int64), never_landed=int(r.neverLanded))
     if shadow is not None:
         n = int(env.totalActions())
         out["confusion"] = np.asarray(r.confusion, dtype=np.int64).reshape(n, n)
@@ -539,3 +555,117 @@ def epymarl_init(clone, base_step_dir, out_root, normaliser_file, lr):
     params = [torch.nn.Parameter(state[k].clone()) for k in agent.keys()]
     torch.save(torch.optim.Adam(params, lr=lr).state_dict(), out / "agent_opt.th")
     return str(out.parent)
+
+
+def recorded_delays(paths, bots=False):
+    """The seen distances of recorded datasets (pysaga.dataset's .npz files), every decision
+    that has one: the lag the players' inputs really had, to draw a harness's delays from.
+    Bots' decisions are left out unless asked for, where the JSON beside a file says whose
+    each episode is."""
+    out = []
+    for path in paths:
+        d = np.load(path)
+        if "seen_distance" not in d.files:
+            raise SystemExit("%s has no seen_distance: it was written before lag was recorded" % path)
+        seen, keep = d["seen_distance"], np.ones(len(d["seen_distance"]), dtype=bool)
+        meta = pathlib.Path(str(path)[:-4] + ".json")
+        if not bots and meta.is_file():
+            episodes = json.loads(meta.read_text(encoding="utf-8")).get("episodes", [])
+            is_bot = np.array([bool(e.get("bot")) for e in episodes], dtype=bool)
+            if len(is_bot) > int(d["episode"].max(initial=-1)):
+                keep = ~is_bot[d["episode"]]
+        out.append(seen[keep & (seen >= 0)])
+    out = np.concatenate(out) if out else np.zeros(0, dtype=np.int64)
+    if not len(out):
+        raise SystemExit("no decision of %s has a seen distance" % ", ".join(str(p) for p in paths))
+    return out.astype(np.int64)
+
+
+def policy_pace(spec, default=4, root=None):
+    """The rate a policy decides at: a file's own frame_skip, else `default` (a bot's name)."""
+    if not (spec.startswith("neural:") or spec.startswith("sample:")):
+        return int(default)
+    bridge.start_jvm(root)
+    import jpype
+    nets = jpype.JClass("saga.sim.rl.NeuralPolicy")
+    return int(nets.weights(nets.specFile(spec)).training.frameSkip)
+
+
+def lag_sweep(env, policy, opponent, delays=(0, 1, 2, 3, 5), recorded=None, shadow=None, episodes=200,
+              seed=300000, pace=None, opp_pace=4, opponent_delayed=True):
+    """A policy's play as its actions land later: a row per fixed delay, and one with each
+    action's delay drawn from `recorded` (a list of delays in ticks: recorded_delays).
+
+    Each row holds the shares of episodes won, lost, drawn and timed out, the per-episode
+    means, the agreement with `shadow` where one is given, and the mean ticks the policy's
+    actions took to land. The opponent's actions are delayed the same way unless
+    `opponent_delayed` is False: two players of one round share its lag. The same seeds are
+    played in every row, so rows differ by the delay alone.
+    """
+    pace = policy_pace(policy) if pace is None else int(pace)
+    rows = []
+
+    def row(name, **kw):
+        res = run(env, policy, opponent, episodes, seed, pace=pace, opp_pace=opp_pace, shadow=shadow, **kw)
+        s = summary(res)
+        bins = res["landed_after"]
+        s["mean_delay"] = float((bins * np.arange(len(bins))).sum() / max(1, bins.sum()))
+        s["delay"] = name
+        rows.append(s)
+
+    for d in delays:
+        row(str(int(d)), delay=int(d), opp_delay=int(d) if opponent_delayed else 0)
+    if recorded is not None and len(recorded):
+        row("recorded", delays=recorded, opp_delays=recorded if opponent_delayed else None)
+    return rows
+
+
+def report_sweep(rows):
+    agree = any("agreement" in r for r in rows)
+    print("  %-9s %6s %6s %6s %8s %7s %7s%s  %s" % ("delay", "win", "loss", "draw", "timeout", "kills", "deaths",
+                                                   "  agreement" if agree else "", "landed after (ticks)"))
+    for r in rows:
+        print("  %-9s %5.1f%% %5.1f%% %5.1f%% %7.1f%% %7.2f %7.2f%s  %.2f"
+              % (r["delay"], 100 * r["win"], 100 * r["loss"], 100 * r["draw"], 100 * r["timeout"], r["kills"], r["deaths"],
+                 ("  %8.1f%%" % (100 * r["agreement"]) if "agreement" in r else "           ") if agree else "",
+                 r["mean_delay"]))
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Imitation tools: a policy's play under lag.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("lag-sweep", help="a policy's outcomes and agreement as its actions land later")
+    s.add_argument("policy", help="a policy file, or a bot's name")
+    s.add_argument("--opponent", default="kite")
+    s.add_argument("--shadow", help="a policy asked at every decision what it would do: the agreement column")
+    s.add_argument("--delays", default="0,1,2,3,5", help="fixed delays to play, in ticks of 50 ms")
+    s.add_argument("--recorded", nargs="+", help="datasets (.npz) whose seen distances a row's delays are drawn from")
+    s.add_argument("--with-bots", action="store_true", help="draw from recorded bots' decisions too")
+    s.add_argument("--opponent-undelayed", action="store_true", help="delay the policy's actions alone")
+    s.add_argument("--episodes", type=int, default=200)
+    s.add_argument("--seed", type=int, default=300000)
+    s.add_argument("--map", help="a map's name or file (the open test map)")
+    s.add_argument("--observability", default="full")
+    s.add_argument("--pace", type=int, help="ticks a decision, for a bot's name (a policy file plays at its own)")
+    s.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+    policy = a.policy if ":" in a.policy or not os.path.exists(a.policy) else "neural:" + a.policy
+    env, _ = make_env(a.map, a.observability)
+    recorded = recorded_delays(a.recorded, bots=a.with_bots) if a.recorded else None
+    rows = lag_sweep(env, policy, a.opponent, delays=[int(x) for x in a.delays.split(",") if x != ""],
+                     recorded=recorded, shadow=a.shadow, episodes=a.episodes, seed=a.seed, pace=a.pace,
+                     opponent_delayed=not a.opponent_undelayed)
+    if a.json:
+        print(json.dumps(rows))
+        return
+    print("Lag sweep: %s against %s, %d episodes a row%s" % (policy, a.opponent, a.episodes,
+          "" if a.opponent_undelayed else ", both players delayed"))
+    if recorded is not None:
+        q = np.percentile(recorded, [50, 90, 99])
+        print("  recorded: %d inputs, delay median %d, 90%% %d, 99%% %d, most %d ticks"
+              % (len(recorded), q[0], q[1], q[2], recorded.max()))
+    report_sweep(rows)
+
+
+if __name__ == "__main__":
+    main()

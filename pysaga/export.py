@@ -168,7 +168,8 @@ def training_of(env, kw, agent):
     progression = bool(kw.get("progression", False))
     kit = "basic" if progression else str(kw.get("kit", "dealt"))
     mode = str(kw.get("mode", "duel"))
-    team_size = int(kw.get("team_size", 0)) if mode in ("tdm", "dom", "ma", "team_deathmatch", "domination", "monster_attack") else 0
+    number = int(jpype.JClass("saga.sim.rl.Scenario").modeOf(mode))
+    team_size = int(kw.get("team_size", 0)) if jpype.JClass("saga.map.Modes").teams(number) else 0
     env.reset(seed=1)
     slot = int(jenv.slotOf(agent))
     stride = int(jpype.JClass("saga.sim.GameState").HOTBAR_STRIDE)

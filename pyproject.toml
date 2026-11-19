@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pysaga"
-version = "0.1.795"
+version = "0.2.1070"
 description = "Saga Online as a multi-agent reinforcement learning environment"
 requires-python = ">=3.9"
 # The Python code: Apache 2.0. The bundled simulation and data (pysaga/_data): LICENSE-SIMULATION.md

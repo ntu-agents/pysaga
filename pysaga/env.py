@@ -21,11 +21,11 @@ from . import bridge
 
 #: Accepted values for `mode`, with the aliases each one answers to.
 #:
-#: One table, and parse() below is the only thing that reads it, so the list a
-#: rejection prints cannot drift from the list it accepts. The scenario runner
-#: once answered a typo by offering three scenarios that had been deleted,
-#: because a hardcoded list sat beside a hardcoded dispatch.
-MODES = ("duel", "dm", "tdm", "team_deathmatch", "dom", "domination", "ma", "monster_attack")
+#: The modes are the game's (saga.map.Modes, read through the JVM by _scenario):
+#: a mode's short name (dm, tdm, dom, ma, ...) or its long one, with an underscore
+#: where it reads better (team_deathmatch, monster_attack), and "duel" for dm.
+#: No second list is kept here, so the names accepted cannot drift from the game's.
+MODES = ("duel", "a mode's short or long name: saga.map.Modes")
 
 
 class MultiAgentEnv(object):
@@ -50,7 +50,8 @@ class SagaEnv(MultiAgentEnv):
                  common_reward=False, reward_scalarisation="sum",
                  observability="full", progression=False, reward="dense",
                  mode="duel", team_size=2, scripted=None, kit="dealt", map_seed="fixed",
-                 map_schedule=None, monsters=0, frame_skip=4, normalise=None, **kwargs):
+                 map_schedule=None, monsters=0, frame_skip=4, normalise=None,
+                 time_limit=300, score_limit=None, cutoff=None, lives=5, **kwargs):
         """
         map_name is where the map comes from: a map of the game folder
         ("Ravenford"), a map file ("/path/to/map.json"), or the generator
@@ -155,7 +156,7 @@ class SagaEnv(MultiAgentEnv):
                 % (", ".join(sorted(repr(k) for k in kwargs)),
                    "map_name, seed, root, common_reward, reward_scalarisation, "
                    "observability, progression, reward, mode, team_size, scripted, kit, map_seed, "
-                   "map_schedule, monsters, frame_skip, normalise"))
+                   "map_schedule, monsters, frame_skip, normalise, time_limit, score_limit, cutoff, lives"))
         if map_schedule:
             # The schedule moves on with the environment steps the RUNNER counts:
             # the vectorised runner calls VecSagaEnv.advance, and nothing tells a
@@ -190,7 +191,9 @@ class SagaEnv(MultiAgentEnv):
         # line said "tdm" -- the same failure the reward names are strict about,
         # and for the same reason: a run that looked like it measured something it
         # did not.
-        scenario = _scenario(Scenario, mode, map_name, team_size, progression, kit, monsters, frame_skip)
+        scenario = _scenario(Scenario, mode, map_name, team_size, progression, kit, monsters, frame_skip,
+                             time_limit, score_limit, cutoff, lives)
+        self.round = _round_record(scenario)
 
         self.mode = mode
         self.monsters = int(monsters)
@@ -420,7 +423,7 @@ class SagaEnv(MultiAgentEnv):
         """The options this environment was built with, as a replay file records them."""
         return {"map_name": self.map_name, "map_seed": self.map_seed, "mode": self.mode, "team_size": self.team_size,
                 "kit": self.kit, "progression": self.progression, "monsters": self.monsters,
-                "frame_skip": self.frame_skip, "observability": self.observability,
+                "frame_skip": self.frame_skip, "observability": self.observability, **self.round,
                 "reward": self.reward_name, "learner": getattr(self, "learner_name", None),
                 "normalise": self.normalise}
 
@@ -497,7 +500,8 @@ def _map_texts(pairs):
     return out
 
 
-def _scenario(Scenario, mode, map_name, team_size, progression, kit="dealt", monsters=0, frame_skip=4):
+def _scenario(Scenario, mode, map_name, team_size, progression, kit="dealt", monsters=0, frame_skip=4,
+              time_limit=300, score_limit=None, cutoff=None, lives=5):
     """The Java Scenario for a mode -- the one place the mode names are read.
 
     Shared by SagaEnv and VecSagaEnv, so neither can enumerate the modes a second
@@ -514,20 +518,15 @@ def _scenario(Scenario, mode, map_name, team_size, progression, kit="dealt", mon
     unreachable in a team mode, and the episode dealt fixed builds while reporting
     progression=True.
     """
-    if mode in ("duel", "dm"):
-        scenario = Scenario.duel(map_name)
-    elif mode in ("tdm", "team_deathmatch"):
-        scenario = Scenario.teamDeathmatch(map_name, int(team_size))
-    elif mode in ("dom", "domination"):
-        scenario = Scenario.domination(map_name, int(team_size))
-    elif mode in ("ma", "monster_attack"):
-        # Monster Attack: team_size players on one team against a horde the world
-        # spawns from the map's monster homes; monsters=n sizes its pool (8 if 0).
-        scenario = Scenario.monsterAttack(map_name, int(team_size))
-    else:
-        raise ValueError(
-            "unknown mode %r -- one of: %s"
-            % (mode, ", ".join(MODES)))
+    # The mode by the game's own list (Scenario.modeOf: saga.map.Modes, "duel" and
+    # underscores accepted); Monster Attack's team_size is its players, monsters=n
+    # its pool (8 if 0)
+    import jpype
+    number = int(Scenario.modeOf(str(mode)))
+    if number < 0:
+        names = [str(n) for n in jpype.JClass("saga.map.Modes").NAMES]
+        raise ValueError("unknown mode %r -- one of: duel, %s" % (mode, ", ".join(names)))
+    scenario = Scenario.ofMode(number, map_name, int(team_size or 0))
     if kit not in KITS:
         raise ValueError("unknown kit %r -- one of: %s" % (kit, ", ".join(KITS)))
     if progression and kit == "basic":
@@ -553,9 +552,37 @@ def _scenario(Scenario, mode, map_name, team_size, progression, kit="dealt", mon
     # world's ticks that rate divides, and the environment warns once when rates differ.
     if int(frame_skip) < 1:
         raise ValueError("frame_skip=%r: ticks a decision lasts, 1 or more" % (frame_skip,))
-    if int(frame_skip) != int(scenario.frameSkip):
-        scenario = Scenario.withFrameSkip(scenario, int(frame_skip))
+    # The episode's end, the user's to say (Scenario.withRound): the round's clock in seconds
+    # (time_limit; at its end the mode names the winner and the episode is TERMINATED), an
+    # earlier end at a score (score_limit; the mode's own when None, 0 for none), a cutoff in
+    # seconds that TRUNCATES with no winner (None for none), and Monster Attack's deaths per
+    # player. A length the decision rate does not divide is refused, and so is an episode
+    # with no end at all.
+    for name, value in (("time_limit", time_limit), ("cutoff", cutoff)):
+        if value is not None and float(value) < 0:
+            raise ValueError("%s=%r: seconds of game time, 0 or more" % (name, value))
+    if score_limit is not None and int(score_limit) < 0:
+        raise ValueError("score_limit=%r: a score, 0 for none" % (score_limit,))
+    if int(lives) < 1:
+        raise ValueError("lives=%r: Monster Attack's deaths per player, 1 or more" % (lives,))
+    try:
+        round_ticks = int(Scenario.ticksOf(float(time_limit), "time_limit")) if time_limit else 0
+        cut_ticks = int(Scenario.ticksOf(float(cutoff), "cutoff")) if cutoff else 0
+        limit = int(scenario.scoreLimit) if score_limit is None else int(score_limit)
+        scenario = Scenario.withRound(scenario, round_ticks, limit, cut_ticks, int(lives), int(frame_skip))
+    except Exception as e:
+        if isinstance(e, ValueError):
+            raise
+        raise ValueError(str(e).split(": ", 1)[-1]) from None
     return scenario
+
+
+def _round_record(scenario):
+    """The episode's end as a replay file records it: seconds, the score limit and lives."""
+    tick = 1000.0 / int(scenario.TICK_MS)
+    seconds = lambda t: (int(t) / tick) if int(t) else None
+    return {"time_limit": seconds(scenario.roundTicks), "score_limit": int(scenario.scoreLimit),
+            "cutoff": seconds(scenario.cutoffTicks), "lives": int(scenario.lives)}
 
 
 def _reward(RewardFunction, reward):
@@ -668,6 +695,7 @@ def _episode_info(jenv):
     for team in stats["teams_in_round"]:
         info["win_team%d" % team] = 1 if winner == team else 0
     info["draw"] = 1 if winner == jenv.WINNER_DRAW else 0
+    info["lost"] = 1 if winner == jenv.WINNER_LOST else 0
     return info
 
 
@@ -723,14 +751,16 @@ def _observability(Observability, spec):
     A terrain patch -- the walk and sight flags of the blocks within r of the
     agent's own, appended to its observation -- is "+terrain:r" after a mode's name
     ("los+terrain:4") or "terrain": r in a mapping. It widens the observation, so a
-    policy trained without it does not bind to an environment with it.
+    policy trained without it does not bind to an environment with it. The clock --
+    the share of the round left, the observation's last number -- is on unless
+    "+noclock" follows the name or "clock": False stands in the mapping.
     """
     if isinstance(spec, dict):
         # A key nothing reads is refused, as every other option is: a typo in a
         # mapping would otherwise build a different mode with no word said.
         allowed = (_MODE_KEYS.get(spec.get("mode")) if "mode" in spec
-                   else {"channels", "terrain"} if "channels" in spec
-                   else _CHANNEL_KEYS | {"terrain"})
+                   else {"channels", "terrain", "clock"} if "channels" in spec
+                   else _CHANNEL_KEYS | {"terrain", "clock"})
         if allowed is None:
             raise ValueError("unknown observability mode %r -- one of: %s"
                              % (spec.get("mode"), ", ".join(sorted(_MODE_KEYS))))
@@ -738,6 +768,9 @@ def _observability(Observability, spec):
         if unknown:
             raise ValueError("observability %r: unknown key(s) %s -- accepted here: %s"
                              % (spec, ", ".join(unknown), ", ".join(sorted(allowed))))
+    if isinstance(spec, dict) and "clock" in spec:
+        rest = {k: v for k, v in spec.items() if k != "clock"}
+        return _observability(Observability, rest or None).withClock(bool(spec["clock"]))
     if isinstance(spec, dict) and "terrain" in spec:
         rest = {k: v for k, v in spec.items() if k != "terrain"}
         return _observability(Observability, rest or None).withTerrain(int(spec["terrain"]))
@@ -778,10 +811,10 @@ def _observability(Observability, spec):
 
 # The keys a mapping may hold: one channel written out, or a named mode's arguments.
 _CHANNEL_KEYS = {"range", "line_of_sight", "respect_invisibility", "allies_only", "reveals", "fov_degrees"}
-_MODE_KEYS = {"full": {"mode", "terrain"}, "los": {"mode", "terrain"},
-              "sight": {"mode", "range", "terrain"}, "squad": {"mode", "range", "terrain"},
-              "radar": {"mode", "range", "terrain"}, "cone": {"mode", "range", "fov_degrees", "terrain"},
-              "hearing": {"mode", "range", "hearing_range", "terrain"}}
+_MODE_KEYS = {"full": {"mode", "terrain", "clock"}, "los": {"mode", "terrain", "clock"},
+              "sight": {"mode", "range", "terrain", "clock"}, "squad": {"mode", "range", "terrain", "clock"},
+              "radar": {"mode", "range", "terrain", "clock"}, "cone": {"mode", "range", "fov_degrees", "terrain", "clock"},
+              "hearing": {"mode", "range", "hearing_range", "terrain", "clock"}}
 
 
 def _channel(Channel, ObsLayout, spec):

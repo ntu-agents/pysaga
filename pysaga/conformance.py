@@ -148,6 +148,7 @@ def main():
     maps()
     terrain()
     monsters()
+    round_end()
 
     print("\n" + ("ALL PASS" if fail == 0 else "%d FAILURE(S)" % fail))
     return 1 if fail else 0
@@ -439,6 +440,67 @@ def _png_size(uri):
     return tuple(int(v) for v in struct.unpack(">II", raw[16:24]))
 
 
+def round_end():
+    """The episode's end, the user's: the mode's score limits by default, a time limit that
+    terminates with a winner, a cutoff that truncates, the options refused by name, and a
+    replay with its own limits reaching its hash in pysaga and read by the game's player."""
+    import json
+    import os
+    import tempfile
+    import jpype
+
+    print("\nthe episode's end:")
+    limits = {m: int(SagaEnv(map_name=GREENHAVEN, mode=m)._env.scenario().scoreLimit) for m in ("duel", "tdm", "dom")}
+    check("the modes' own score limits by default", limits == {"duel": 3, "tdm": 10, "dom": 30}, str(limits))
+    env = SagaEnv(map_name=GREENHAVEN, time_limit=10, score_limit=0)
+    env.reset(seed=4)
+    steps, term, trunc, info = 0, False, False, {}
+    while not (term or trunc):
+        _, _, term, trunc, info = env.step([0] * env.n_agents)
+        steps += 1
+    check("time_limit ends it at its clock, terminated, with its winner named", term and not trunc and steps == 50
+          and not info.get("episode_limit") and info.get("draw") == 1, "%d decisions, %s" % (steps, info))
+    env = SagaEnv(map_name=GREENHAVEN, time_limit=10, cutoff=5)
+    env.reset(seed=4)
+    steps, term, trunc, info = 0, False, False, {}
+    while not (term or trunc):
+        _, _, term, trunc, info = env.step([0] * env.n_agents)
+        steps += 1
+    check("a cutoff truncates, and says so to EPyMARL", trunc and not term and steps == 25 and info.get("episode_limit")
+          and env.episode_limit == 25, "%d decisions, limit %d" % (steps, env.episode_limit))
+    refused = []
+    for bad in ({"time_limit": -1}, {"time_limit": 0.01}, {"cutoff": 0.33}, {"score_limit": -2}, {"lives": 0},
+                {"time_limit": 0, "cutoff": None}, {"time_limit": 0.1, "frame_skip": 4}):
+        try:
+            SagaEnv(map_name=GREENHAVEN, **bad)
+        except ValueError:
+            refused.append(True)
+    check("a bad end is refused by name", len(refused) == 7, "%d of 7" % len(refused))
+    env = SagaEnv(map_name=GREENHAVEN, kit="basic", scripted="0:melee", time_limit=20, score_limit=2, lives=3)
+    env.reset(seed=8)
+    rng = np.random.default_rng(5)
+    for _ in range(200):
+        legal = [a for a, ok in enumerate(env.get_avail_agent_actions(0)) if ok]
+        _, _, term, trunc, _ = env.step([int(rng.choice(legal))])
+        if term or trunc:
+            break
+    path = os.path.join(tempfile.gettempdir(), "saga-conformance-round.json")
+    env.save_replay(path)
+    r = json.load(open(path))
+    options = {k: v for k, v in r["env"].items() if k != "learner"}
+    again = SagaEnv(scripted={int(k): v for k, v in r["episodes"][0]["scripted"].items()}, **options)
+    again.reset(seed=r["episodes"][0]["seed"])
+    for acts in r["episodes"][0]["actions"]:
+        again.step(acts)
+    check("a replay records its end and replays to its hash", r["env"].get("time_limit") == 20
+          and r["env"].get("score_limit") == 2 and r["env"].get("lives") == 3
+          and again.state_hash() == r["episodes"][0]["hash"], str({k: r["env"].get(k) for k in ("time_limit", "score_limit", "cutoff", "lives")}))
+    sc = jpype.JClass("saga.sim.rl.ReplayPlayer").scenarioOf(
+        jpype.JClass("saga.sim.rl.ReplayFile").read(jpype.JClass("java.io.File")(path)))
+    check("and the game's own replay player reads it", int(sc.roundTicks) == 400 and int(sc.scoreLimit) == 2
+          and int(sc.lives) == 3 and int(sc.cutoffTicks) == 0, "%d %d %d" % (int(sc.roundTicks), int(sc.scoreLimit), int(sc.lives)))
+
+
 def rate():
     """frame_skip: another decision rate is an episode as long in game time, recorded, replayed to its hash."""
     import json
@@ -625,7 +687,7 @@ def maps():
           (run.stdout + run.stderr).strip()[-120:])
 
     print("\na curriculum over maps:")
-    cur = VecSagaEnv(2, map_name=GREENHAVEN, map_schedule="0:gen:arena:size=50x40|100:" + GREENHAVEN + "|300:gen:lakes:size=60x50")
+    cur = VecSagaEnv(2, map_name=GREENHAVEN, map_schedule="0:gen:arena:size=50x40|100:" + GREENHAVEN + "|300:gen:field:size=60x50")
     cur.advance(0)
     cur.reset(seed=1)
     a = cur.map_info(0)["source"]
@@ -635,7 +697,7 @@ def maps():
     cur.advance(10 ** 6)
     cur.reset()
     c = cur.map_info(0)["source"]
-    check("each entry from its step on", (a, b, c) == ("gen:arena:size=50x40", GREENHAVEN, "gen:lakes:size=60x50"), "%s, %s, %s" % (a, b, c))
+    check("each entry from its step on", (a, b, c) == ("gen:arena:size=50x40", GREENHAVEN, "gen:field:size=60x50"), "%s, %s, %s" % (a, b, c))
     for bad, words in (("x:gen:arena", "steps"), ("0:gen:arena:houses=3", "has no setting")):
         try:
             VecSagaEnv(1, map_schedule=bad)
