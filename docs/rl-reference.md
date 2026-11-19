@@ -29,6 +29,7 @@ to a default and trains a different game from the one you asked for.
 | `kit`, `progression` | `"dealt"`, `False` | [What a character starts with](#what-a-character-starts-with) |
 | `observability` | `"full"`, with a terrain patch of radius 3 | [Choosing what agents perceive](#choosing-what-agents-perceive) |
 | `reward` | `"dense"` | [Rewards](#4-rewards) |
+| `zero_sum` | `"none"` | [A zero-sum game](#a-zero-sum-game) |
 | `common_reward`, `reward_scalarisation` | `False`, `"sum"` | [One reward for the team](#one-reward-for-the-team) |
 | `map_name`, `map_seed`, `map_schedule` | `"Ravenford"`, `"fixed"`, none | [Maps](#5-maps) |
 | `scripted` | none | [Bots](#bots) |
@@ -595,6 +596,33 @@ changed during the decision. Use a negative weight for anything that should be a
 An unknown term is an error that lists the valid ones. A dictionary cannot be given on
 an EPyMARL command line ([section 8](#8-setting-up-and-running-epymarl)), so set weights in the yaml file, or in
 Python.
+
+### A zero-sum game
+
+No reward above is zero-sum by itself: `"dense"` and `"ladder"` charge every learner the
+same time cost, a death nobody caused has no matching kill, and `win` does not add up to
+zero with three sides or teams of different sizes. The `zero_sum` option makes any
+`reward` name or dictionary zero-sum. At each decision, after the win is paid, it changes
+the rewards of every agent, bots included, by their side. A side is a group of agents who
+are not enemies of each other: a team in the team modes, and each player alone in a
+duel or deathmatch.
+
+| `zero_sum` | an agent i on side t receives | what adds up to zero |
+| --- | --- | --- |
+| `"none"` (default) | r<sub>i</sub>, unchanged | nothing |
+| `"opponents"` | r<sub>i</sub> minus the mean, over the other sides, of each side's mean reward | the sides' mean rewards, whatever their sizes and number |
+| `"all"` | r<sub>i</sub> minus the mean reward of all agents | all agents' rewards |
+| `"team"` | the total reward of side t minus the mean total of the other sides, the same for every member | the sides' rewards, one number per side |
+
+In a duel, `"opponents"` and `"team"` give r<sub>0</sub> - r<sub>1</sub> and
+r<sub>1</sub> - r<sub>0</sub>, and `"all"` half of that. A cost every agent pays alike,
+such as the time penalty, cancels out. Anything that has no opposite moves to the other
+side: a death nobody caused becomes the opponents' gain.
+
+It is refused, with the reason, when the agents form fewer than two sides (Monster Attack
+is one team), with `common_reward` (the summed reward would mean nothing), and with a
+Python reward, which can do its own arithmetic. Like the reward, it does not affect the
+game.
 
 ### One reward for the team
 

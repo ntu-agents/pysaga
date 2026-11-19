@@ -1,11 +1,11 @@
 Published from the development repository by ./run-local.sh publish.
 Edit these files there; the next publish rewrites them.
 
-build: 5e1778a-20261119132850
-version: 0.2.1070
+build: 7081f90-20261119225820
+version: 0.2.1082
 demo state hash: 2218577362867853710
 compatibility: dynamics=2 schema=1 actions=1 layout=32351223be38 content=b6c1c95f0742
-date: 2026-11-19 13:31
+date: 2026-11-19 23:00
 
 published paths:
   .github/workflows/wheel.yml

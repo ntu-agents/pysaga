@@ -148,6 +148,7 @@ def main():
     maps()
     terrain()
     monsters()
+    zero_sum()
     round_end()
 
     print("\n" + ("ALL PASS" if fail == 0 else "%d FAILURE(S)" % fail))
@@ -798,6 +799,93 @@ def monsters():
     shown = run.returncode == 0 and "slime (monster)" in open(page).read()
     check("rl_replay plays it to its hash and names the monsters on the page", shown,
           (run.stdout + run.stderr).strip().splitlines()[-1] if (run.stdout + run.stderr).strip() else "")
+
+
+def zero_sum():
+    """zero_sum by name through both environments: the rewards of a duel sum to zero at every
+    step, the vectorised worlds match single ones, the refusals, and a replay with it."""
+    import json
+    import os
+    import tempfile
+    from pysaga.vec import VecSagaEnv
+
+    print("\nzero_sum:")
+    plain = SagaEnv(map_name=GREENHAVEN, kit="basic", reward="ladder")
+    zs = SagaEnv(map_name=GREENHAVEN, kit="basic", reward="ladder", zero_sum="opponents")
+    plain.reset(seed=21)
+    zs.reset(seed=21)
+    check("the environment answers its option by name", zs.zero_sum == "opponents" and plain.zero_sum == "none",
+          "%s, %s" % (zs.zero_sum, plain.zero_sum))
+    rng = np.random.default_rng(21)
+    steps, off, apart, moved = 0, 0, 0, 0
+    for _ in range(400):
+        acts = [int(rng.choice(np.flatnonzero(np.array(plain.get_avail_agent_actions(a))))) for a in range(plain.n_agents)]
+        _, r, t, tr, _ = plain.step(acts)
+        _, z, t2, tr2, _ = zs.step(acts)
+        steps += 1
+        r, z = np.array(r, dtype=np.float64), np.array(z, dtype=np.float64)
+        if abs(z.sum()) > 1e-5 or not np.allclose(z, [r[0] - r[1], r[1] - r[0]], atol=1e-5):
+            off += 1
+        if abs(r.sum()) > 1e-6:
+            moved += 1
+        if plain.state_hash() != zs.state_hash() or (t, tr) != (t2, tr2):
+            apart += 1
+        if t or tr:
+            break
+    check("a duel's opponents rewards are r0 - r1 and sum to zero, the game the same",
+          steps > 50 and moved > 0 and off == 0 and apart == 0,
+          "%d steps, %d raw sums not zero, %d off, %d apart" % (steps, moved, off, apart))
+
+    vec = VecSagaEnv(2, map_name=GREENHAVEN, kit="basic", reward="dense", zero_sum="team", scripted="1:melee|kite")
+    _, _, avail = vec.reset(seed=30)
+    singles = [SagaEnv(map_name=GREENHAVEN, kit="basic", reward="dense", zero_sum="team",
+                       scripted={1: b}) for b in ("melee", "kite")]
+    for i, e in enumerate(singles):
+        e.reset(seed=vec.episode_seed(i))
+    mismatch, over = 0, [False, False]
+    for _ in range(300):
+        acts = np.zeros((2, 1), dtype=np.int32)
+        for w in range(2):
+            acts[w, 0] = int(rng.choice(np.flatnonzero(avail[w, 0])))
+        _, _, avail, rewards, term, trunc = vec.step(acts)
+        for i, e in enumerate(singles):
+            if over[i]:
+                continue
+            _, r, t, tr, _ = e.step(acts[i].tolist())
+            if not np.allclose(rewards[i], r) or vec.state_hash(i) != e.state_hash():
+                mismatch += 1
+            over[i] = t or tr
+        if all(over):
+            break
+    check("a vectorised environment's worlds give a single environment's rewards", mismatch == 0, "%d mismatches" % mismatch)
+
+    refusals = [
+        ("an unknown name", dict(zero_sum="zero")),
+        ("with common_reward", dict(zero_sum="all", common_reward=True)),
+        ("with a Python reward", dict(zero_sum="all", reward=lambda prev, a, nxt, env: [0.0, 0.0])),
+        ("in Monster Attack, one side", dict(zero_sum="all", mode="ma", map_name=os.path.join(
+            os.path.dirname(GREENHAVEN), "homes.json"))),
+    ]
+    for what, kw in refusals:
+        kw.setdefault("map_name", GREENHAVEN)
+        why = None
+        try:
+            SagaEnv(**kw).reset(seed=1)
+        except Exception as e:
+            why = str(e)
+        check("refused " + what, why is not None and "zero_sum" in why, (why or "not refused")[:90])
+
+    path = os.path.join(tempfile.gettempdir(), "saga-conformance-zerosum.json")
+    zs.save_replay(path)
+    r = json.load(open(path))
+    options = {k: v for k, v in r["env"].items() if k != "learner"}
+    again = SagaEnv(**options)
+    again.reset(seed=r["episodes"][0]["seed"])
+    for acts in r["episodes"][0]["actions"]:
+        again.step(acts)
+    check("the replay file records it, and replays to its hash", r["env"].get("zero_sum") == "opponents"
+          and again.state_hash() == r["episodes"][0]["hash"], "%s, %d against %d" % (
+          r["env"].get("zero_sum"), again.state_hash(), r["episodes"][0]["hash"]))
 
 
 if __name__ == "__main__":

@@ -67,6 +67,7 @@ def main():
     env_args.pop("normalise", None)   # the learners' input scaling: outside the dynamics, a replay needs no file of it
     if env_args.get("reward") == "custom":
         env_args.pop("reward")
+        env_args.pop("zero_sum", None)    # never set beside a Python reward; a file of before has none
     envs = {}
 
     def env_for(scripted):

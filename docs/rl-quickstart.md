@@ -286,6 +286,8 @@ Change one setting at a time on the training command line, and measure again:
   is in its line of sight.
 - **Another reward**: `env_args.reward=ladder`, which pays a win at the end, meant for
   `gamma=0.995`.
+- **A zero-sum game**: `env_args.zero_sum=opponents`, which makes the rewards of opposing
+  sides add up to zero (`all` and `team` are the other ways to make them do so).
 - **Learning from an expert**: clone a bot or a trained policy, measure how closely the
   clone plays, and start IPPO from it. See [Imitation and offline learning](imitation.md).
 

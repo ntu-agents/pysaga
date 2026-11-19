@@ -28,7 +28,7 @@ import numpy as np
 
 from . import bridge
 from .env import (DEFAULT_MAP, MODES, REPLAY_VERSION, _episode_info, _map_entry, _map_texts, _observability, _reward,
-                  _round_record, _scenario, _scripted_specs, _stats)
+                  _round_record, _scenario, _scripted_specs, _stats, _zero_sum)
 
 
 class VecSagaEnv(object):
@@ -38,7 +38,7 @@ class VecSagaEnv(object):
                  observability="full", progression=False, reward="dense",
                  mode="duel", team_size=2, parallel=True, auto_reset=False,
                  scripted=None, kit="dealt", map_seed="fixed", map_schedule=None, monsters=0, frame_skip=4, normalise=None,
-                 time_limit=300, score_limit=None, cutoff=None, lives=5, **kwargs):
+                 time_limit=300, score_limit=None, cutoff=None, lives=5, zero_sum="none", **kwargs):
         """The options of SagaEnv, read by the same code, plus:
 
         n_envs      how many worlds
@@ -66,7 +66,7 @@ class VecSagaEnv(object):
                    "n_envs, map_name, seed, root, common_reward, "
                    "reward_scalarisation, observability, progression, reward, "
                    "mode, team_size, parallel, auto_reset, scripted, kit, map_seed, map_schedule, monsters, frame_skip, normalise, "
-                   "time_limit, score_limit, cutoff, lives"))
+                   "time_limit, score_limit, cutoff, lives, zero_sum"))
         if callable(reward):
             raise TypeError(
                 "a Python reward runs per world per step; the vectorised "
@@ -130,6 +130,7 @@ class VecSagaEnv(object):
         if self.map_name != map_name or self.map_seed != "fixed":
             self._vec.setMapSource(self.map_name, self.map_seed)
         self.reward_name = str(self._vec.env(0).reward())
+        self.zero_sum = _zero_sum(self._vec, zero_sum, False, common_reward)
 
         self.n_agents = int(self._vec.nAgents())
         self.episode_limit = int(self._vec.episodeLimit())
@@ -303,7 +304,7 @@ class VecSagaEnv(object):
                "kit": self.kit, "progression": self.progression, "monsters": self.monsters,
                "frame_skip": self.frame_skip, **self.round,
                "observability": self.observability,
-               "reward": self.reward_name, "learner": getattr(self, "learner_name", None),
+               "reward": self.reward_name, "zero_sum": self.zero_sum, "learner": getattr(self, "learner_name", None),
                "normalise": self.normalise}
         maps = _map_texts([(self._maps[w], self._vec.env(w)) for w in worlds])
         with open(path, "w") as f:

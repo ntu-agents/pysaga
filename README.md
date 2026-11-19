@@ -11,7 +11,7 @@ The package provides:
 
 - environments with a Gym-style interface, and a vectorised one that steps many worlds in
   one call, with a choice of observability (full, line of sight, a cone of view and others),
-  rewards, maps and opponents (the game's scripted bots or trained policies);
+  rewards (zero-sum if you want them), maps and opponents (the game's scripted bots or trained policies);
 - EPyMARL's algorithms, IPPO and MAPPO among them, set up to train on these environments;
 - tools to export a trained policy, evaluate it against the game's bots, and watch its
   episodes as replays in a browser or in the game;

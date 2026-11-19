@@ -59,6 +59,11 @@ env_args:
   # weights over kill, death, damage_dealt, damage_taken, time, win, score, ...
   # ladder pays the win at the end of the episode and is meant for gamma=0.995.
   reward: "dense"
+  # Makes what the sides receive sum to zero, applied to whatever the reward gives, after
+  # the win: none (the reward as it is) | opponents (less the mean of the other sides'
+  # mean rewards) | all (less the mean over all agents) | team (the side's total less the
+  # mean of the others' totals). Refused with one side (Monster Attack) or common_reward.
+  zero_sum: "none"
   # Bots in the slots it names, so a learner trains against a fixed reference:
   # a name for every slot but the first ("kite"), a list for slots 1, 2, ...
   # (["melee", "kite"]), or {slot: name}. On the command line a string --

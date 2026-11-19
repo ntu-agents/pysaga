@@ -51,8 +51,16 @@ class SagaEnv(MultiAgentEnv):
                  observability="full", progression=False, reward="dense",
                  mode="duel", team_size=2, scripted=None, kit="dealt", map_seed="fixed",
                  map_schedule=None, monsters=0, frame_skip=4, normalise=None,
-                 time_limit=300, score_limit=None, cutoff=None, lives=5, **kwargs):
+                 time_limit=300, score_limit=None, cutoff=None, lives=5, zero_sum="none", **kwargs):
         """
+        zero_sum makes what the sides receive sum to zero, applied to whatever `reward`
+        gives, after the win is priced: "none" (the default, the reward as it is),
+        "opponents" (each agent's reward less the mean over the other sides of each side's
+        mean: the sides' means sum to zero), "all" (less the mean over all agents: all sum
+        to zero) or "team" (its side's total less the mean of the other sides' totals, the
+        same for every member). Refused with fewer than two sides (Monster Attack), with
+        common_reward and with a Python reward.
+
         map_name is where the map comes from: a map of the game folder
         ("Ravenford"), a map file ("/path/to/map.json"), or the generator
         ("gen:forest:trees=120", with an optional "@seed"). map_seed says how often
@@ -156,7 +164,7 @@ class SagaEnv(MultiAgentEnv):
                 % (", ".join(sorted(repr(k) for k in kwargs)),
                    "map_name, seed, root, common_reward, reward_scalarisation, "
                    "observability, progression, reward, mode, team_size, scripted, kit, map_seed, "
-                   "map_schedule, monsters, frame_skip, normalise, time_limit, score_limit, cutoff, lives"))
+                   "map_schedule, monsters, frame_skip, normalise, time_limit, score_limit, cutoff, lives, zero_sum"))
         if map_schedule:
             # The schedule moves on with the environment steps the RUNNER counts:
             # the vectorised runner calls VecSagaEnv.advance, and nothing tells a
@@ -242,6 +250,7 @@ class SagaEnv(MultiAgentEnv):
             self._env.setReward(fn)
         self.reward_name = ("custom" if self._reward_fn
                             else str(self._env.reward()))
+        self.zero_sum = _zero_sum(self._env, zero_sum, self._reward_fn is not None, common_reward)
 
         self._seed = 0 if seed is None else int(seed)
         self._episode = 0
@@ -424,7 +433,7 @@ class SagaEnv(MultiAgentEnv):
         return {"map_name": self.map_name, "map_seed": self.map_seed, "mode": self.mode, "team_size": self.team_size,
                 "kit": self.kit, "progression": self.progression, "monsters": self.monsters,
                 "frame_skip": self.frame_skip, "observability": self.observability, **self.round,
-                "reward": self.reward_name, "learner": getattr(self, "learner_name", None),
+                "reward": self.reward_name, "zero_sum": self.zero_sum, "learner": getattr(self, "learner_name", None),
                 "normalise": self.normalise}
 
     def save_replay(self, path="saga_replay.json"):
@@ -583,6 +592,26 @@ def _round_record(scenario):
     seconds = lambda t: (int(t) / tick) if int(t) else None
     return {"time_limit": seconds(scenario.roundTicks), "score_limit": int(scenario.scoreLimit),
             "cutoff": seconds(scenario.cutoffTicks), "lives": int(scenario.lives)}
+
+
+def _zero_sum(env, zero_sum, python_reward, common_reward):
+    """Sets the zero-sum option on a Java environment (SagaEnv or VecEnv) and answers its name.
+
+    One door for both environments. Refused by name: a Python reward does its own
+    arithmetic, and common_reward sums the agents into one number a zero-sum reward makes
+    meaningless; the Java side refuses an unknown name and fewer than two sides.
+    """
+    from saga.sim.rl import ZeroSum
+    name = "none" if zero_sum is None else str(zero_sum)
+    if name != "none":
+        if python_reward:
+            raise ValueError("zero_sum=%r with a Python reward: it does its own arithmetic -- "
+                             "give zero_sum='none' with it, or a reward name or dict" % name)
+        if common_reward:
+            raise ValueError("zero_sum=%r with common_reward: the agents' one summed reward would mean "
+                             "nothing -- give zero_sum='none' with it" % name)
+    env.setZeroSum(ZeroSum.byName(name))
+    return name
 
 
 def _reward(RewardFunction, reward):
